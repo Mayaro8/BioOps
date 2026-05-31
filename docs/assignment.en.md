@@ -20,17 +20,18 @@ BioOps is not a single big bot, but **a set of specialized agents** under a sing
    ───────────►  │  (router / supervisor)  │  to the right agent
                  └────────────┬────────────┘
                               │
-   ┌──────────┬──────────┬────┴─────┬──────────┬──────────────┐
-   ▼          ▼          ▼          ▼          ▼              ▼
- Knowledge  Review   Cluster    Submit    Infra/Cost     Batch
-  Agent     Agent    Health     Master    Monitoring     Status
-                     Agent      Agent     Agents         Agent
-   │          │          │          │          │              │
-   └──────────┴──────────┴────┬─────┴──────────┴──────────────┘
-                              ▼
-                          Tools:
+   ┌──────┬──────┬───┴──┬──────┬──────┬──────┐
+   ▼      ▼      ▼      ▼      ▼      ▼      ▼
+ Know-  Review Cluster Submit Infra/ Batch  Storage
+ ledge  Agent  Health  Master Cost   Status Agent
+ Agent         Agent   Agent  Mon.   Agent
+   │      │      │      │      │      │      │
+   └──────┴──────┴──┬───┴──────┴──────┴──────┘
+                    ▼
+                        Tools:
         k8s API · GitHub API · Yandex Cloud API · ClickHouse ·
-        queues · Cloud Functions · vector DB (docs) · status DB
+        queues · Cloud Functions · Object Storage (S3) ·
+        vector DB (docs) · status DB
 ```
 
 Key principles:
@@ -50,6 +51,8 @@ Key principles:
 | CH | ClickHouse — an analytical database. |
 | Compute Cloud | The virtual machines service (Yandex Cloud). |
 | Cloud Functions | Serverless cloud functions (Yandex Cloud). |
+| Object Storage (S3) | Object storage; data lives in buckets (e.g. `genotek-testing`). |
+| `genotek-testing` | A bucket in Object Storage with processing data/artifacts. |
 | MR / PR | Merge / Pull Request. |
 
 ## 4. Functional requirements (epics)
@@ -108,6 +111,15 @@ Several proactive monitors with alerts.
 - **F2.** Synchronizes the table with a Google Doc (two-way or one-way — to be confirmed with the mentor).
 - **F3.** Answers questions about the status of any batch.
 
+### Epic G. Storage / Bucket Agent — bucket consultations `P1`
+
+An agent that knows the structure of the object storage and can compute aggregates over it.
+
+- **G1.** Advises on the structure of the `genotek-testing` bucket: which prefixes/folders exist, what is stored where, how the data is organized.
+- **G2.** Answers aggregate questions about the contents, for example: the total size of all `.bam` files, the number of objects by type/prefix, the size of a specific folder.
+- **G3.** The data source is the S3 inventory / bucket listing. For heavy aggregates, rely on the inventory rather than a full "live" scan on every request.
+- **G4.** The answer states as of when the data is current (the inventory/listing date).
+
 ## 5. Non-functional requirements
 
 - **Extensibility.** Adding a new agent/tool/monitor should not require rewriting the core.
@@ -124,7 +136,7 @@ Several proactive monitors with alerts.
 - **Agent orchestration:** LangGraph / LangChain or an equivalent with tool-calling.
 - **LLM:** as agreed with the mentor (whatever is available inside the company's environment).
 - **RAG:** a vector DB (Qdrant / pgvector / Chroma) for step documentation.
-- **Integrations:** Kubernetes Python client, GitHub API (PyGithub), Yandex Cloud SDK/CLI, ClickHouse client, queue client.
+- **Integrations:** Kubernetes Python client, GitHub API (PyGithub), Yandex Cloud SDK/CLI, ClickHouse client, queue client, S3 client (boto3) + S3 inventory.
 - **Interface:** a Telegram/Bitrix bot + webhook for alerts.
 - **Scheduler:** APScheduler / cron / k8s CronJob for periodic checks.
 - **Status storage:** a relational DB + synchronization with the Google Sheets API.
@@ -146,6 +158,7 @@ Each stage ends with a working demo and a code review with the mentor.
 ### Stage 2. Launching and managing processing (weeks 4–5) `P1`
 - Epic D (Submit Master Agent).
 - Epic F (Batch Status Agent).
+- Epic G (Storage / Bucket Agent).
 
 ### Stage 3. Infrastructure monitoring and review (weeks 6–7) `P1`
 - Epic E (Infra & Cost Monitoring): E1–E4.
@@ -175,6 +188,7 @@ A feature is considered done when:
 - [ ] Access to Yandex Cloud: Compute Cloud (VM cost), Cloud Functions, billing.
 - [ ] Access to the DB hosts and ClickHouse (metrics, mutations).
 - [ ] Access to the queue system.
+- [ ] Access to Object Storage (the `genotek-testing` bucket) and to the S3 inventory, if configured.
 - [ ] A description of the submit master: config format, how it is launched, where the logs are.
 - [ ] Access to the LLM provider inside the company's environment.
 - [ ] An alert channel (Telegram/Bitrix) and a Google Doc for batch statuses.
