@@ -1,12 +1,12 @@
 # bio-ops
 
-**BioOps** — мультиагентная система для эксплуатации биоинформатических пайплайнов Genotek.
+**BioOps** is a multi-agent system for operating Genotek's bioinformatics pipelines.
 
-Помогает команде: отвечает на вопросы об устройстве `pipeline-v3.0`, делает ревью шагов и MR, следит за здоровьем k8s-кластеров, БД, очередей и облачных функций, управляет запуском обработки через submit master, мониторит стоимость инфраструктуры и ведёт прозрачную картину статусов обработки батчей.
+It helps the team: answers questions about how `pipeline-v3.0` works, reviews steps and MRs, monitors the health of k8s clusters, databases, queues, and cloud functions, manages processing runs via the submit master, monitors infrastructure cost, and maintains a transparent view of batch processing statuses.
 
-Проект разрабатывается в рамках летней практики 2026.
+The project is being developed as part of the 2026 summer internship.
 
-## Документация
+## Documentation
 
-- [Задание на практику](docs/assignment.md) — цели, требования, архитектура, этапы и критерии приёмки.
-- [Internship assignment (English)](docs/assignment.en.md) — English version of the document above.
+- [Internship assignment (English)](docs/assignment.en.md) — goals, requirements, architecture, stages, and acceptance criteria.
+- [Задание на практику (Russian)](docs/assignment.md) — Russian version of the document above.
