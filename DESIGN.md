@@ -29,18 +29,3 @@ In the background, the **Health Agent** and the **Cost and Infrastructure Agents
 | XXX Scheduler       | APScheduler / cron / k8s CronJob for periodic checks                                                                                     |
 | XXX Status storage  | Relational DB + synchronization with the Google Sheets API                                                                               |
 
----
-
-## Integrations
-
-The planned integrations are:
-
-* Kubernetes Python client
-* GitHub API / PyGithub
-* Yandex Cloud SDK/CLI
-* ClickHouse client
-* Queue client
-* S3 client / boto3
-* S3 inventory
-
-These will show up as the work progresses.
