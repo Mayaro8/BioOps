@@ -1,7 +1,6 @@
 from bioops.logging_config import setup_logging
 from bioops.graph_orchestrator import LangGraphOrchestrator
 
-
 def main() -> None:
     setup_logging()
 
