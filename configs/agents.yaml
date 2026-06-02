@@ -1,0 +1,12 @@
+agents:
+  echo:
+    enabled: true
+    description: "Repeats the user message. Used to test the orchestrator."
+
+  knowledge:
+    enabled: false
+    description: "Answers questions about pipeline-v3.0 documentation."
+
+  cluster_health:
+    enabled: false
+    description: "Checks Kubernetes cluster health, pod status, logs, cost, and ETA."
