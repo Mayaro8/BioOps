@@ -1,0 +1,25 @@
+---
+description: Keep the internship assignment docs in sync across Russian and English
+globs: docs/assignment*.md,README.md
+alwaysApply: false
+---
+
+# Bilingual docs must stay in sync
+
+The internship assignment exists in two languages and they must always match:
+
+- `docs/assignment.md` — Russian (source of truth for content).
+- `docs/assignment.en.md` — English.
+- `README.md` — English, links to both.
+
+## Rule
+
+Any change to content (requirements, epics, stack, stages, thresholds, structure)
+MUST be applied to **both** `docs/assignment.md` and `docs/assignment.en.md` in the
+same change set. Never update one language without the other.
+
+- Keep section numbering, headings, tables, and the architecture diagram aligned 1:1.
+- Business-specific values (e.g. the `50,000 ₽/month` threshold, `3 hours`, `pipeline-v3.0`) stay identical in both versions — translate prose, not these values.
+- If you add a new doc section, add it to both files.
+
+Before finishing, verify both files reflect the change.
