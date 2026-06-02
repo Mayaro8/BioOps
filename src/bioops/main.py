@@ -1,12 +1,11 @@
 from bioops.logging_config import setup_logging
-from bioops.orchestrator import Orchestrator
+from bioops.graph_orchestrator import LangGraphOrchestrator
 
 
 def main() -> None:
     setup_logging()
 
-    orchestrator = Orchestrator()
-
+    orchestrator = LangGraphOrchestrator()
     print("BioOps CLI started. Type 'exit' to quit.")
 
     while True:

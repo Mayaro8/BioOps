@@ -2,7 +2,6 @@ import logging
 
 from bioops.agents.echo_agent import EchoAgent
 
-
 logger = logging.getLogger(__name__)
 
 

@@ -1,6 +1,5 @@
 from bioops.agents.base import BaseAgent
 
-
 class EchoAgent(BaseAgent):
     """Simple test agent that repeats the user message."""
 
