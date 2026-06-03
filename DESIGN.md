@@ -29,3 +29,22 @@ In the background, the **Health Agent** and the **Cost and Infrastructure Agents
 | XXX Scheduler       | APScheduler / cron / k8s CronJob for periodic checks                                                                                     |
 | XXX Status storage  | Relational DB + synchronization with the Google Sheets API                                                                               |
 
+
+
+Data scheme for the bam file input:
+
+ Минимальный JSON файл для запуска haplotypecaller должен быть следующим:
+
+ ```
+{
+  "sample_id": "an5575-c",
+  "batch_id": "E51FC2183",
+  "s3_bucket": "s3://genotek-testing/employees/sukhanova/pipeline_3.0/containers/cutadapt",
+  "s3_out": "s3://genotek-testing/employees/sukhanova/pipeline_3.0/containers/fq2bam",
+  "reference": "s3://genotek-testing/db_filesystem/hg38/hg38.fna",
+  "assembly": "hg38",
+  "known_indels": "s3://genotek-testing/db_filesystem/vcfs/known_indels.hg38.vcf.gz",
+  "dbsnp_vcf": "s3://genotek-testing/db_filesystem/vcfs/dbSNP.hg38.vcf.gz",
+  "type": "gvcf_vcf"
+}
+ ```
