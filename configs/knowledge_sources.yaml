@@ -1,0 +1,31 @@
+pipeline:
+  name: "pipeline-v3.0"
+  description: "Bioinformatics processing pipeline organized as ordered steps."
+
+steps:
+  haplotype caller:
+    order: 1
+    name: "bam to gvcf"
+    description: "haplotype caller"
+    inputs:
+      - "bam file"
+    outputs:
+      - "gvcf file"
+    how_it_works: "Script for variant calling"
+    run_parameters:
+      - " not figured yet."
+    docs_url: "TODO: add documentation link"
+    repo_url: "TODO: add repository link"
+  gvcf to vcf:
+    order: 2
+    name: "gvcf to vcf"
+    description: "gvcf to vcf"
+    inputs:
+      - "gvcf file"
+    outputs:
+      - "vcf file"
+    how_it_works: "Script for variant calling"
+    run parameters:
+      - "Not defined yet"
+    docs_url: "TODO: add documentation link"
+    repo_url:  "TODO: add repository link"

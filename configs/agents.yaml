@@ -4,7 +4,7 @@ agents:
     description: "Repeats the user message. Used to test the orchestrator."
 
   knowledge:
-    enabled: false
+    enabled: true
     description: "Answers questions about pipeline-v3.0 documentation."
 
   cluster_health:
