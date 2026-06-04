@@ -17,10 +17,16 @@ class KnowledgeAgent(BaseAgent):
         self.knowledge = self._load_knowledge()
 
     def run(self, message: str) -> str:
-        message_lower = message.lower()
+        message_lower = message.lower().strip()
 
         matched_step = self._find_step(message_lower)
+
         if matched_step:
+            requested_field = self._detect_requested_field(message_lower)
+
+            if requested_field:
+                return self._format_step_field_answer(matched_step, requested_field)
+
             return self._format_step_answer(matched_step)
 
         if self._is_pipeline_overview_question(message_lower):
@@ -45,10 +51,79 @@ class KnowledgeAgent(BaseAgent):
 
         for step_id, step_data in steps.items():
             step_name = str(step_data.get("name", ""))
-            aliases = [step_id.lower(), step_name.lower()]
+            description = str(step_data.get("description", ""))
+
+            aliases = [
+                step_id.lower(),
+                step_name.lower(),
+                description.lower(),
+            ]
+
+            aliases.extend(
+                str(alias).lower()
+                for alias in step_data.get("aliases", [])
+            )
 
             if any(alias and alias in message for alias in aliases):
                 return step_data
+
+        return None
+
+    def _detect_requested_field(self, message: str) -> str | None:
+        field_keywords = {
+            "inputs": [
+                "input",
+                "inputs",
+                "take",
+                "takes",
+                "require",
+                "requires",
+                "needed",
+            ],
+            "outputs": [
+                "output",
+                "outputs",
+                "produce",
+                "produces",
+                "result",
+                "results",
+                "generate",
+                "generates",
+            ],
+            "run_parameters": [
+                "parameter",
+                "parameters",
+                "param",
+                "params",
+                "argument",
+                "arguments",
+                "option",
+                "options",
+            ],
+            "how_it_works": [
+                "how",
+                "how it works",
+                "explain",
+                "logic",
+                "what does it do",
+                "purpose",
+            ],
+            "docs_url": [
+                "docs",
+                "documentation",
+                "manual",
+            ],
+            "repo_url": [
+                "repo",
+                "repository",
+                "github",
+                "source code",
+            ],
+        }
+
+        for field, keywords in field_keywords.items():
+            if any(keyword in message for keyword in keywords):
+                return field
 
         return None
 
@@ -100,6 +175,38 @@ class KnowledgeAgent(BaseAgent):
 
         return "\n".join(lines)
 
+    def _format_step_field_answer(self, step: dict[str, Any], field: str) -> str:
+        step_name = step.get("name", "unknown")
+
+        field_titles = {
+            "inputs": "Inputs",
+            "outputs": "Outputs",
+            "run_parameters": "Run parameters",
+            "how_it_works": "How it works",
+            "docs_url": "Documentation",
+            "repo_url": "Repository",
+        }
+
+        title = field_titles.get(field, field)
+        value = step.get(field)
+
+        if field in {"inputs", "outputs", "run_parameters"}:
+            formatted_value = self._format_list(value or [])
+        else:
+            formatted_value = value or "Not configured"
+
+        return "\n".join(
+            [
+                f"Step: {step_name}",
+                "",
+                f"{title}:",
+                formatted_value,
+                "",
+                "Primary source:",
+                self._get_primary_source(step),
+            ]
+        )
+
     def _format_step_answer(self, step: dict[str, Any]) -> str:
         return "\n".join(
             [
@@ -123,8 +230,23 @@ class KnowledgeAgent(BaseAgent):
                 "Sources:",
                 f"- Documentation: {step.get('docs_url', 'Not configured')}",
                 f"- Repository: {step.get('repo_url', 'Not configured')}",
+                "",
+                "Primary source:",
+                self._get_primary_source(step),
             ]
         )
+
+    def _get_primary_source(self, step: dict[str, Any]) -> str:
+        docs_url = step.get("docs_url")
+        repo_url = step.get("repo_url")
+
+        if docs_url and docs_url != "TODO: add documentation link":
+            return docs_url
+
+        if repo_url and repo_url != "TODO: add repository link":
+            return repo_url
+
+        return "Not configured"
 
     def _format_list(self, values: list[str]) -> str:
         if not values:
@@ -133,11 +255,23 @@ class KnowledgeAgent(BaseAgent):
         return "\n".join(f"- {value}" for value in values)
 
     def _format_not_found_answer(self) -> str:
+        steps = self.knowledge.get("steps", {})
+
+        if not steps:
+            return (
+                "I could not find a matching pipeline step because no steps are "
+                "configured in configs/knowledge_sources.yaml."
+            )
+
+        configured_steps = "\n".join(
+            f"- {step.get('name', step_id)}"
+            for step_id, step in steps.items()
+        )
+
         return (
             "I could not find a matching pipeline step in the configured knowledge sources.\n\n"
-            "Try asking about:\n"
-            "- pipeline overview\n"
-            "- configured steps\n"
-            "- a specific step name\n\n"
-            "If this is a real pipeline-v3.0 step, add it to configs/knowledge_sources.yaml."
+            "Try asking about one of these configured steps:\n"
+            f"{configured_steps}\n\n"
+            "You can ask for inputs, outputs, run parameters, how the step works, "
+            "documentation, or repository links."
         )

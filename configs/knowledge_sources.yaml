@@ -25,7 +25,7 @@ steps:
     outputs:
       - "vcf file"
     how_it_works: "Script for variant calling"
-    run parameters:
+    run_parameters:
       - "Not defined yet"
     docs_url: "TODO: add documentation link"
     repo_url:  "TODO: add repository link"
