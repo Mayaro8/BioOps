@@ -217,4 +217,3 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 src/bioops/agents/chatgpt.ipynb
-*.pyc
