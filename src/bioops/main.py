@@ -11,7 +11,7 @@ def main() -> None:
         message = input("You: ")
 
         if message.lower() in {"exit", "quit"}:
-            print("BioOps stopped.")
+            print("Goodbye")
             break
 
         response = orchestrator.route(message)
