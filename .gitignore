@@ -217,3 +217,5 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 src/bioops/agents/chatgpt.ipynbsrc/bioops/agents/chatgpt.ipynb
+kubectl
+minikube-linux-amd64
