@@ -1,7 +1,34 @@
 import re
 from pathlib import Path
 
+import fitz  # PyMuPDF
+
 from bioops.rag.schemas import KnowledgeChunk
+
+
+SUPPORTED_EXTENSIONS = {".md", ".txt", ".yaml", ".yml", ".json", ".pdf"}
+
+
+def read_pdf_text(path: Path) -> str:
+    """Extract text from a PDF file using PyMuPDF."""
+    pages: list[str] = []
+
+    with fitz.open(path) as document:
+        for page in document:
+            page_text = page.get_text("text") or ""
+            pages.append(page_text)
+
+    return "\n".join(pages)
+
+
+def read_document_text(path: Path) -> str:
+    """Read supported document types as text."""
+    suffix = path.suffix.lower()
+
+    if suffix == ".pdf":
+        return read_pdf_text(path)
+
+    return path.read_text(encoding="utf-8", errors="replace")
 
 
 def split_into_sentences(text: str) -> list[str]:
@@ -11,7 +38,6 @@ def split_into_sentences(text: str) -> list[str]:
     units = []
 
     for line in lines:
-        # Keep structured lines as their own units.
         if (
             line.startswith(("#", "-", "*", "|"))
             or ":" in line
@@ -20,7 +46,6 @@ def split_into_sentences(text: str) -> list[str]:
             units.append(line)
             continue
 
-        # Split prose into sentences.
         parts = re.split(r"(?<=[.!?])\s+", line)
         units.extend(part.strip() for part in parts if part.strip())
 
@@ -59,7 +84,11 @@ def chunk_text(
 
             chunk_number += 1
 
-            current_units = current_units[-overlap_sentences:] if overlap_sentences else []
+            current_units = (
+                current_units[-overlap_sentences:]
+                if overlap_sentences
+                else []
+            )
             current_length = sum(len(item) for item in current_units)
 
         current_units.append(unit)
@@ -82,7 +111,17 @@ def chunk_text(
 
 def chunk_file(path: str | Path) -> list[KnowledgeChunk]:
     path = Path(path)
-    text = path.read_text(encoding="utf-8")
+
+    if not path.is_file():
+        return []
+
+    if path.suffix.lower() not in SUPPORTED_EXTENSIONS:
+        return []
+
+    text = read_document_text(path)
+
+    if not text.strip():
+        return []
 
     return chunk_text(
         text=text,
