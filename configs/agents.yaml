@@ -8,5 +8,5 @@ agents:
     description: "Answers questions about pipeline-v3.0 documentation."
 
   cluster_health:
-    enabled: false
+    enabled: true
     description: "Checks Kubernetes cluster health, pod status, logs, cost, and ETA."
