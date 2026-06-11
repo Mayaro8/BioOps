@@ -219,3 +219,4 @@ __marimo__/
 src/bioops/agents/chatgpt.ipynbsrc/bioops/agents/chatgpt.ipynb
 kubectl
 minikube-linux-amd64
+*.pdf
