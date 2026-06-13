@@ -5,6 +5,7 @@ from langgraph.graph import END, START, StateGraph
 from bioops.agents.echo_agent import EchoAgent
 from bioops.agents.knowledge_agent import KnowledgeAgent
 from bioops.agents.cluster_health_agent import ClusterHealthAgent
+from bioops.agents.review_agent import ReviewAgent
 
 
 class BioOpsState(TypedDict):
@@ -16,10 +17,17 @@ class BioOpsState(TypedDict):
 echo_agent = EchoAgent()
 knowledge_agent = KnowledgeAgent()
 cluster_health_agent = ClusterHealthAgent()
+review_agent = ReviewAgent()
 
 
 def router_node(state: BioOpsState) -> BioOpsState:
     message = state["message"].lower()
+    message_tokens = set(
+        message.replace("/", " ")
+        .replace("-", " ")
+        .replace("_", " ")
+        .split()
+    )
 
     cluster_health_keywords = [
         "cluster",
@@ -38,6 +46,19 @@ def router_node(state: BioOpsState) -> BioOpsState:
         "eta",
         "cost",
     ]
+
+    review_keywords = [
+        "review",
+        "code review",
+        "pull request",
+        "merge request",
+        "diff",
+        "changed files",
+        "changes",
+        "repository review",
+    ]
+
+    review_tokens = {"pr", "mr"}
 
     knowledge_keywords = [
         "pipeline",
@@ -71,6 +92,11 @@ def router_node(state: BioOpsState) -> BioOpsState:
 
     if any(keyword in message for keyword in cluster_health_keywords):
         selected_agent = "cluster_health"
+    elif (
+        any(keyword in message for keyword in review_keywords)
+        or bool(review_tokens.intersection(message_tokens))
+    ):
+        selected_agent = "review"
     elif any(keyword in message for keyword in knowledge_keywords):
         selected_agent = "knowledge"
     else:
@@ -113,6 +139,15 @@ def cluster_health_node(state: BioOpsState) -> BioOpsState:
     }
 
 
+def review_node(state: BioOpsState) -> BioOpsState:
+    response = review_agent.run(state["message"])
+
+    return {
+        **state,
+        "response": response,
+    }
+
+
 def build_graph():
     graph = StateGraph(BioOpsState)
 
@@ -120,6 +155,7 @@ def build_graph():
     graph.add_node("echo", echo_node)
     graph.add_node("knowledge", knowledge_node)
     graph.add_node("cluster_health", cluster_health_node)
+    graph.add_node("review", review_node)
 
     graph.add_edge(START, "router")
 
@@ -130,12 +166,14 @@ def build_graph():
             "echo": "echo",
             "knowledge": "knowledge",
             "cluster_health": "cluster_health",
+            "review": "review",
         },
     )
 
     graph.add_edge("echo", END)
     graph.add_edge("knowledge", END)
     graph.add_edge("cluster_health", END)
+    graph.add_edge("review", END)
 
     return graph.compile()
 

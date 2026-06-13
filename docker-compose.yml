@@ -13,6 +13,7 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: bioops-app
+    working_dir: /app
     env_file:
       - .env
     environment:
@@ -20,10 +21,9 @@ services:
       - QDRANT_URL=http://localhost:6333
       - QDRANT_COLLECTION=bioops_knowledge
     volumes:
-      - ./configs:/app/configs
-      - ./docs:/app/docs
+      - .:/app
       - ~/.kube:/root/.kube:ro
-      - ~/.minikube:/home/mayar/.minikube:ro
+      - ~/.minikube:/root/.minikube:ro
     depends_on:
       - qdrant
     stdin_open: true
