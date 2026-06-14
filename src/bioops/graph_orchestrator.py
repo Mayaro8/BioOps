@@ -6,6 +6,7 @@ from bioops.agents.echo_agent import EchoAgent
 from bioops.agents.knowledge_agent import KnowledgeAgent
 from bioops.agents.cluster_health_agent import ClusterHealthAgent
 from bioops.agents.review_agent import ReviewAgent
+from bioops.agents.batch_status_agent import BatchStatusAgent
 
 
 class BioOpsState(TypedDict):
@@ -16,18 +17,37 @@ class BioOpsState(TypedDict):
 
 echo_agent = EchoAgent()
 knowledge_agent = KnowledgeAgent()
-cluster_health_agent = ClusterHealthAgent()
 review_agent = ReviewAgent()
+
+# Lazy-loaded so pytest/imports do not load Kubernetes config immediately.
+cluster_health_agent: ClusterHealthAgent | None = None
+batch_status_agent: BatchStatusAgent | None = None
 
 
 def router_node(state: BioOpsState) -> BioOpsState:
     message = state["message"].lower()
+
     message_tokens = set(
         message.replace("/", " ")
         .replace("-", " ")
         .replace("_", " ")
+        .replace(".", " ")
+        .replace(",", " ")
         .split()
     )
+
+    batch_status_keywords = [
+        "batch",
+        "batches",
+        "batch status",
+        "job status",
+        "jobs",
+        "progress",
+        "failed batch",
+        "running batch",
+        "completion",
+        "completed batch",
+    ]
 
     cluster_health_keywords = [
         "cluster",
@@ -90,7 +110,9 @@ def router_node(state: BioOpsState) -> BioOpsState:
         "variant calling",
     ]
 
-    if any(keyword in message for keyword in cluster_health_keywords):
+    if any(keyword in message for keyword in batch_status_keywords):
+        selected_agent = "batch_status"
+    elif any(keyword in message for keyword in cluster_health_keywords):
         selected_agent = "cluster_health"
     elif (
         any(keyword in message for keyword in review_keywords)
@@ -131,7 +153,19 @@ def knowledge_node(state: BioOpsState) -> BioOpsState:
 
 
 def cluster_health_node(state: BioOpsState) -> BioOpsState:
-    response = cluster_health_agent.run(state["message"])
+    global cluster_health_agent
+
+    try:
+        if cluster_health_agent is None:
+            cluster_health_agent = ClusterHealthAgent()
+
+        response = cluster_health_agent.run(state["message"])
+    except Exception as error:
+        response = (
+            "Cluster Health Agent failed to connect to Kubernetes.\n\n"
+            f"Error: {type(error).__name__}: {error}\n\n"
+            "Check Kubernetes access, kubeconfig, and Docker volume mounts."
+        )
 
     return {
         **state,
@@ -148,6 +182,27 @@ def review_node(state: BioOpsState) -> BioOpsState:
     }
 
 
+def batch_status_node(state: BioOpsState) -> BioOpsState:
+    global batch_status_agent
+
+    try:
+        if batch_status_agent is None:
+            batch_status_agent = BatchStatusAgent()
+
+        response = batch_status_agent.run(state["message"])
+    except Exception as error:
+        response = (
+            "Batch Status Agent failed to collect batch status.\n\n"
+            f"Error: {type(error).__name__}: {error}\n\n"
+            "Check Kubernetes access, kubeconfig, and Docker volume mounts."
+        )
+
+    return {
+        **state,
+        "response": response,
+    }
+
+
 def build_graph():
     graph = StateGraph(BioOpsState)
 
@@ -156,6 +211,7 @@ def build_graph():
     graph.add_node("knowledge", knowledge_node)
     graph.add_node("cluster_health", cluster_health_node)
     graph.add_node("review", review_node)
+    graph.add_node("batch_status", batch_status_node)
 
     graph.add_edge(START, "router")
 
@@ -167,6 +223,7 @@ def build_graph():
             "knowledge": "knowledge",
             "cluster_health": "cluster_health",
             "review": "review",
+            "batch_status": "batch_status",
         },
     )
 
@@ -174,6 +231,7 @@ def build_graph():
     graph.add_edge("knowledge", END)
     graph.add_edge("cluster_health", END)
     graph.add_edge("review", END)
+    graph.add_edge("batch_status", END)
 
     return graph.compile()
 

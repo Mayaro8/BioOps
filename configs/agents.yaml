@@ -10,3 +10,11 @@ agents:
   cluster_health:
     enabled: true
     description: "Checks Kubernetes cluster health, pod status, logs, cost, and ETA."
+
+  review:
+    enabled: true
+    description: "Reviews repositories, PRs/MRs, code changes, risks, style, logic issues, and missing tests."
+
+  batch_status:
+    enabled: true
+    description: "Summarizes batch/job progress, running steps, failed steps, and completion status."
