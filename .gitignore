@@ -220,3 +220,13 @@ src/bioops/agents/chatgpt.ipynbsrc/bioops/agents/chatgpt.ipynb
 kubectl
 minikube-linux-amd64
 *.pdf
+
+# Python cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Python cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
