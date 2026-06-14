@@ -10,6 +10,9 @@ agents:
   cluster_health:
     enabled: true
     description: "Checks Kubernetes cluster health, pod status, logs, cost, and ETA."
+    namespace: bioops
+    request_timeout_seconds: 5
+    log_tail_lines: 50
 
   review:
     enabled: true
