@@ -1,0 +1,30 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: bioops-gvcf2vcf-
+  labels:
+    pipeline: pipeline-v3.0
+    batch_id: batch260625
+    pipeline_step: gvcf2vcf
+spec:
+  entrypoint: main
+  templates:
+    - name: main
+      steps:
+        - - name: gvcf2vcf
+            template: gvcf2vcf
+
+    - name: gvcf2vcf
+      metadata:
+        labels:
+          pipeline_step: gvcf2vcf
+          batch_id: batch260625
+          tube_id: TUBE1
+      container:
+        image: busybox
+        command: [sh, -c]
+        args:
+          - |
+            echo "Running fake GVCF2VCF for TUBE1"
+            sleep 60
+            echo "Done"

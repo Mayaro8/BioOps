@@ -21,11 +21,14 @@ agents:
   batch_status:
     enabled: true
     description: "Summarizes batch/job progress, running steps, failed steps, and completion status."
+    argo_namespace: argo
   
   submit_master:
     enabled: true
-    description: "Prepares dry-run submit-master plans for launching pipeline jobs."
-    dry_run_only: true    
+    description: "Prepares and optionally submits Argo workflows for pipeline jobs."
+    dry_run_only: false
+    argo_namespace: argo
+    workflow_file: configs/workflows/bioops-fake-gvcf2vcf-workflow.yaml
   
   storage:
     enabled: true
