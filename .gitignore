@@ -230,3 +230,9 @@ __pycache__/
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.env
+.venv/
+__pycache__/
+.pytest_cache/
+kubectl
+minikube-linux-amd64
