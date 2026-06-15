@@ -21,3 +21,24 @@ agents:
   batch_status:
     enabled: true
     description: "Summarizes batch/job progress, running steps, failed steps, and completion status."
+  
+  submit_master:
+    enabled: true
+    description: "Prepares dry-run submit-master plans for launching pipeline jobs."
+    dry_run_only: true    
+  
+  storage:
+    enabled: true
+    description: "Answers read-only questions about bucket contents, prefixes, file counts, and storage size."
+    bucket_name:
+    inventory_path:
+    default_prefix:
+  infra_cost:
+    enabled: true
+    description: "Monitors infrastructure health, cloud cost, ClickHouse, queues, and Cloud Functions."
+    yandex_cloud_id:
+    yandex_folder_id:
+    yandex_service_account_key_path:
+    clickhouse_dsn:
+    queue_url:
+    cloud_functions_endpoint:

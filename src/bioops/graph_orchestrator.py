@@ -7,6 +7,9 @@ from bioops.agents.knowledge_agent import KnowledgeAgent
 from bioops.agents.cluster_health_agent import ClusterHealthAgent
 from bioops.agents.review_agent import ReviewAgent
 from bioops.agents.batch_status_agent import BatchStatusAgent
+from bioops.agents.submit_master_agent import SubmitMasterAgent
+from bioops.agents.storage_agent import StorageAgent
+from bioops.agents.infra_cost_agent import InfraCostAgent
 
 
 class BioOpsState(TypedDict):
@@ -18,6 +21,9 @@ class BioOpsState(TypedDict):
 echo_agent = EchoAgent()
 knowledge_agent = KnowledgeAgent()
 review_agent = ReviewAgent()
+submit_master_agent = SubmitMasterAgent()
+storage_agent = StorageAgent()
+infra_cost_agent = InfraCostAgent()
 
 # Lazy-loaded so pytest/imports do not load Kubernetes config immediately.
 cluster_health_agent: ClusterHealthAgent | None = None
@@ -35,6 +41,63 @@ def router_node(state: BioOpsState) -> BioOpsState:
         .replace(",", " ")
         .split()
     )
+
+    submit_master_keywords = [
+        "submit master",
+        "submit job",
+        "submit batch",
+        "submit sample",
+        "launch job",
+        "launch batch",
+        "launch sample",
+        "start job",
+        "start batch",
+        "start pipeline",
+        "run pipeline",
+        "prepare submission",
+        "prepare submit",
+        "dry run submission",
+        "dry-run submission",
+    ]
+
+    storage_keywords = [
+        "storage",
+        "bucket",
+        "object storage",
+        "s3",
+        "inventory",
+        "prefix",
+        "prefixes",
+        "file count",
+        "files count",
+        "count files",
+        "total size",
+        "storage size",
+        "bam files",
+        "cram files",
+        "vcf files",
+        "fastq files",
+    ]
+
+    infra_cost_keywords = [
+        "infra",
+        "infrastructure",
+        "cloud cost",
+        "cost monitoring",
+        "vm cost",
+        "yandex",
+        "yandex cloud",
+        "yc",
+        "gpu",
+        "billing",
+        "clickhouse",
+        "queue",
+        "queues",
+        "cloud function",
+        "cloud functions",
+        "expensive vm",
+        "monitor cost",
+    ]
 
     batch_status_keywords = [
         "batch",
@@ -110,7 +173,13 @@ def router_node(state: BioOpsState) -> BioOpsState:
         "variant calling",
     ]
 
-    if any(keyword in message for keyword in batch_status_keywords):
+    if any(keyword in message for keyword in submit_master_keywords):
+        selected_agent = "submit_master"
+    elif any(keyword in message for keyword in storage_keywords):
+        selected_agent = "storage"
+    elif any(keyword in message for keyword in infra_cost_keywords):
+        selected_agent = "infra_cost"
+    elif any(keyword in message for keyword in batch_status_keywords):
         selected_agent = "batch_status"
     elif any(keyword in message for keyword in cluster_health_keywords):
         selected_agent = "cluster_health"
@@ -203,6 +272,33 @@ def batch_status_node(state: BioOpsState) -> BioOpsState:
     }
 
 
+def submit_master_node(state: BioOpsState) -> BioOpsState:
+    response = submit_master_agent.run(state["message"])
+
+    return {
+        **state,
+        "response": response,
+    }
+
+
+def storage_node(state: BioOpsState) -> BioOpsState:
+    response = storage_agent.run(state["message"])
+
+    return {
+        **state,
+        "response": response,
+    }
+
+
+def infra_cost_node(state: BioOpsState) -> BioOpsState:
+    response = infra_cost_agent.run(state["message"])
+
+    return {
+        **state,
+        "response": response,
+    }
+
+
 def build_graph():
     graph = StateGraph(BioOpsState)
 
@@ -212,6 +308,9 @@ def build_graph():
     graph.add_node("cluster_health", cluster_health_node)
     graph.add_node("review", review_node)
     graph.add_node("batch_status", batch_status_node)
+    graph.add_node("submit_master", submit_master_node)
+    graph.add_node("storage", storage_node)
+    graph.add_node("infra_cost", infra_cost_node)
 
     graph.add_edge(START, "router")
 
@@ -224,6 +323,9 @@ def build_graph():
             "cluster_health": "cluster_health",
             "review": "review",
             "batch_status": "batch_status",
+            "submit_master": "submit_master",
+            "storage": "storage",
+            "infra_cost": "infra_cost",
         },
     )
 
@@ -232,6 +334,9 @@ def build_graph():
     graph.add_edge("cluster_health", END)
     graph.add_edge("review", END)
     graph.add_edge("batch_status", END)
+    graph.add_edge("submit_master", END)
+    graph.add_edge("storage", END)
+    graph.add_edge("infra_cost", END)
 
     return graph.compile()
 
