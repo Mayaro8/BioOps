@@ -19,14 +19,24 @@ class PodStatus:
 class K8sHealthTool:
     """Reads pod health and log errors from a real Kubernetes cluster."""
 
-    def __init__(self, namespace: str = "bioops"):
+    def __init__(
+        self,
+         namespace: str = "bioops",
+        request_timeout_seconds: int = 5,
+        log_tail_lines: int = 50,
+    ):
         self.namespace = namespace
+        self.request_timeout_seconds = request_timeout_seconds
+        self.log_tail_lines = log_tail_lines
+
         config.load_kube_config()
         self.core_api = client.CoreV1Api()
 
     def get_pods(self) -> list[PodStatus]:
-        pods = self.core_api.list_namespaced_pod(namespace=self.namespace)
-
+        pods = self.core_api.list_namespaced_pod(
+        namespace=self.namespace,
+        _request_timeout=self.request_timeout_seconds,
+        )
         pod_statuses = []
 
         for pod in pods.items:
@@ -55,7 +65,7 @@ class K8sHealthTool:
 
         return pod_statuses
 
-    def get_pod_logs(self, pod_name: str, tail_lines: int = 50) -> str:
+    def get_pod_logs(self, pod_name: str, tail_lines: int | None = None) -> str:
         """Read recent logs from one pod."""
         try:
             logs = self.core_api.read_namespaced_pod_log(
@@ -106,7 +116,10 @@ class K8sHealthTool:
         errors = []
 
         try:
-            pods = self.core_api.list_namespaced_pod(namespace=self.namespace)
+            pods = self.core_api.list_namespaced_pod(
+                 namespace=self.namespace,
+                _request_timeout=self.request_timeout_seconds,
+                )       
         except ApiException as exc:
             return [f"Could not read pods from namespace {self.namespace}: {exc}"]
 

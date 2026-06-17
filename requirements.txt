@@ -189,3 +189,4 @@ zstandard==0.25.0
 pypdf
 pymupdf
 PyGithub
+python-telegram-bot

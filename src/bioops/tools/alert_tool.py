@@ -1,73 +1,85 @@
-import json
 import os
-import urllib.error
-import urllib.request
+from dataclasses import dataclass
+from datetime import datetime, timezone
+
+from dotenv import load_dotenv
+
+from bioops.tools.bitrix_tool import BitrixTool
+
+
+@dataclass
+class AlertResult:
+    ok: bool
+    channel: str
+    message: str
 
 
 class AlertTool:
-    """
-    Sends BioOps alerts to a configured webhook.
+    """Deliver BioOps alerts/status reports to console or external channels."""
 
-    If no webhook is configured, the alert is printed to stdout.
-    This keeps local/dev runs safe and avoids crashing scheduled jobs.
-    """
+    def __init__(self, channel: str | None = None) -> None:
+        load_dotenv()
+        self.channel = (channel or os.getenv("ALERT_CHANNEL") or "console").strip().lower()
 
-    def __init__(
-        self,
-        webhook_url: str | None = None,
-        timeout_seconds: int = 10,
-    ):
-        self.webhook_url = webhook_url or os.getenv("BIOOPS_ALERT_WEBHOOK_URL")
-        self.timeout_seconds = timeout_seconds
-
-    def send(self, title: str, message: str) -> bool:
-        """
-        Send an alert.
-
-        Returns:
-            True if the alert was sent to a webhook.
-            False if no webhook was configured or sending failed.
-        """
-        if not self.webhook_url:
-            self._print_disabled_alert(title, message)
-            return False
-
-        payload = {
-            "text": f"{title}\n\n{message}",
-        }
-
-        request = urllib.request.Request(
-            self.webhook_url,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
+    def send_alert(self, title: str, message: str, severity: str = "warning") -> AlertResult:
+        formatted = self._format_message(
+            prefix="[BIOOPS ALERT]",
+            title=title,
+            message=message,
+            severity=severity,
         )
+        return self._send(formatted)
 
-        try:
-            with urllib.request.urlopen(
-                request,
-                timeout=self.timeout_seconds,
-            ) as response:
-                response.read()
+    def send_status(self, title: str, message: str) -> AlertResult:
+        formatted = self._format_message(
+            prefix="[BIOOPS STATUS]",
+            title=title,
+            message=message,
+            severity="info",
+        )
+        return self._send(formatted)
 
-            print(f"[BIOOPS ALERT SENT] {title}")
-            return True
-
-        except (urllib.error.URLError, TimeoutError) as error:
-            self._print_failed_alert(title, message, error)
-            return False
-
-    def _print_disabled_alert(self, title: str, message: str) -> None:
-        print(f"[BIOOPS ALERT DISABLED] {title}")
-        print("Reason: BIOOPS_ALERT_WEBHOOK_URL is not configured.")
-        print(message)
-
-    def _print_failed_alert(
+    def _format_message(
         self,
+        prefix: str,
         title: str,
         message: str,
-        error: Exception,
-    ) -> None:
-        print(f"[BIOOPS ALERT FAILED] {title}")
-        print(f"Reason: {error}")
-        print(message)
+        severity: str,
+    ) -> str:
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+        return (
+            f"{prefix} {title}\n"
+            f"Severity: {severity}\n"
+            f"Time: {timestamp}\n\n"
+            f"{message}"
+        )
+
+    def _send(self, formatted_message: str) -> AlertResult:
+        if self.channel == "bitrix":
+            bitrix = BitrixTool()
+            result = bitrix.send_message(formatted_message)
+
+            if result.ok:
+                return AlertResult(
+                    ok=True,
+                    channel="bitrix",
+                    message=result.message,
+                )
+
+            print(formatted_message)
+            print(f"[BIOOPS ALERT DELIVERY FAILED] {result.message}")
+
+            return AlertResult(
+                ok=False,
+                channel="bitrix",
+                message=result.message,
+            )
+
+        print(formatted_message)
+
+        return AlertResult(
+            ok=True,
+            channel="console",
+            message="Alert printed to console.",
+        )
