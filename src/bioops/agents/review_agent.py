@@ -10,6 +10,7 @@ from bioops.tools.github_review_tool import (
     GitHubRepoOverviewContext,
     GitHubReviewTool,
 )
+from bioops.tools.llm_review import LLMReviewTool
 
 
 class ReviewAgent(BaseAgent):
@@ -28,14 +29,19 @@ class ReviewAgent(BaseAgent):
     """
 
     name = "review"
-    description = "Reviews repositories, GitHub PRs, changed files, risks, style, logic issues, and missing tests."
+    description = (
+        "Reviews repositories, GitHub PRs, changed files, risks, style, "
+        "logic issues, and missing tests."
+    )
 
     def __init__(
         self,
         github_tool: GitHubReviewTool | None = None,
+        llm_review_tool: LLMReviewTool | None = None,
         default_repo_path: str = ".",
     ):
         self.github_tool = github_tool or GitHubReviewTool()
+        self.llm_review_tool = llm_review_tool or LLMReviewTool()
         self.default_repo_path = default_repo_path
 
     def run(self, message: str) -> str:
@@ -75,7 +81,6 @@ class ReviewAgent(BaseAgent):
         for token in message.split():
             if token.startswith("path="):
                 return token.split("=", 1)[1]
-
         return None
 
     def _format_repo_overview_report(
@@ -126,31 +131,22 @@ class ReviewAgent(BaseAgent):
 
         if not has_readme:
             issues.append("README file was not found at repository root.")
-
         if not has_src:
             issues.append("Expected src/bioops package was not found.")
-
         if not has_tests:
             risks.append("No tests directory detected.")
-
         if not has_dockerfile:
             risks.append("Dockerfile was not found.")
-
         if not has_compose:
             risks.append("Docker Compose file was not found.")
-
         if not has_requirements:
             risks.append("requirements.txt was not found.")
-
         if not has_workflows:
             suggestions.append("Consider adding GitHub Actions for pytest/build checks.")
-
         if has_pycache:
             risks.append("Generated Python cache files appear to be committed.")
-
         if has_env:
             risks.append(".env appears at repository root; secrets must not be committed.")
-
         if has_tests and has_src:
             suggestions.append("Run pytest and Docker build before merging agent changes.")
 
@@ -240,15 +236,10 @@ class ReviewAgent(BaseAgent):
                     f"{pr.changed_files} files, +{pr.additions}/-{pr.deletions}]"
                 )
 
-        lines.extend(
-            [
-                "",
-                "Risks:",
-            ]
-        )
-
+        lines.extend(["", "Risks:"])
         risky_prs = [
-            pr for pr in context.pull_requests
+            pr
+            for pr in context.pull_requests
             if pr.changed_files > 20 or pr.additions + pr.deletions > 1000
         ]
 
@@ -390,6 +381,18 @@ class ReviewAgent(BaseAgent):
         remarks = self._detect_style_logic_remarks(changed_files)
         suggestions = self._detect_suggestions(changed_files)
 
+        llm_review = self._run_llm_patch_review(
+            repo=repo,
+            subject=subject,
+            base=base,
+            head=head,
+            changed_files=changed_files,
+            issues=issues,
+            risks=risks,
+            remarks=remarks,
+            suggestions=suggestions,
+        )
+
         lines: list[str] = []
 
         if include_header:
@@ -428,7 +431,6 @@ class ReviewAgent(BaseAgent):
                 lines.append(
                     f"- {file.filename} [{file.status}, +{file.additions}/-{file.deletions}]"
                 )
-
             if len(changed_files) > 20:
                 lines.append(f"- ... {len(changed_files) - 20} more files")
         else:
@@ -449,16 +451,116 @@ class ReviewAgent(BaseAgent):
         lines.extend(
             [
                 "",
-                "Review note:",
-                "- This is a deterministic read-only review of file paths and patch metadata.",
-                "- LLM patch-level review can be added later using these fetched patches.",
+                "LLM patch review:",
+                llm_review,
                 "",
-                "No GitHub comments were posted.",
-                "No PR status was modified.",
+                "Review note:",
+                "- This is a read-only review using deterministic checks plus optional LLM patch analysis.",
+                "- No GitHub comments were posted.",
+                "- No PR status was modified.",
             ]
         )
 
         return "\n".join(lines)
+
+    def _build_patch_text(
+        self,
+        changed_files: list[GitHubChangedFile],
+        max_files: int = 12,
+        max_patch_chars: int = 12000,
+    ) -> str:
+        patch_sections: list[str] = []
+        total_chars = 0
+
+        for file in changed_files[:max_files]:
+            patch = (file.patch or "").strip()
+            if not patch:
+                continue
+
+            section = (
+                f"File: {file.filename}\n"
+                f"Status: {file.status}, +{file.additions}/-{file.deletions}\n"
+                "Patch:\n"
+                f"{patch}\n"
+            )
+
+            if total_chars + len(section) > max_patch_chars:
+                remaining = max_patch_chars - total_chars
+                if remaining > 500:
+                    patch_sections.append(section[:remaining] + "\n[Patch truncated]")
+                break
+
+            patch_sections.append(section)
+            total_chars += len(section)
+
+        if not patch_sections:
+            return "[No patch text available. Review based on changed-file metadata only.]"
+
+        return "\n---\n".join(patch_sections)
+
+    def _run_llm_patch_review(
+        self,
+        repo: str | None,
+        subject: str,
+        base: str,
+        head: str,
+        changed_files: list[GitHubChangedFile],
+        issues: list[str],
+        risks: list[str],
+        remarks: list[str],
+        suggestions: list[str],
+    ) -> str:
+        if not changed_files:
+            return "LLM patch review unavailable: no changed files were provided."
+
+        patch_text = self._build_patch_text(changed_files)
+
+        deterministic_context = "\n".join(
+            [
+                "Deterministic issues:",
+                *(f"- {item}" for item in issues or ["none"]),
+                "",
+                "Deterministic risks:",
+                *(f"- {item}" for item in risks or ["none"]),
+                "",
+                "Style / logic remarks:",
+                *(f"- {item}" for item in remarks or ["none"]),
+                "",
+                "Suggestions:",
+                *(f"- {item}" for item in suggestions or ["none"]),
+            ]
+        )
+
+        prompt = "\n".join(
+            [
+                "Review this BioOps GitHub patch.",
+                "",
+                f"Repository: {repo or 'not provided'}",
+                f"Subject: {subject}",
+                f"Base branch: {base}",
+                f"Head branch: {head}",
+                "",
+                deterministic_context,
+                "",
+                "Patch text:",
+                "```diff",
+                patch_text,
+                "```",
+                "",
+                "Return a concise patch-level review with exactly these sections:",
+                "",
+                "1. Verdict: one sentence.",
+                "2. Top issues: maximum 3 bullets.",
+                "3. Risks: maximum 2 bullets.",
+                "4. Next steps: maximum 3 bullets.",
+                "",
+                "Keep the full review under 250 words.",
+                "Do not invent files, APIs, tests, or behavior not shown in the patch.",
+                "Do not suggest posting comments, merging, approving, or modifying GitHub.",
+            ]
+        )
+
+        return self.llm_review_tool.review_prompt(prompt)
 
     def _detect_issues(self, files: list[GitHubChangedFile]) -> list[str]:
         filenames = [file.filename for file in files]
@@ -541,17 +643,16 @@ class ReviewAgent(BaseAgent):
 
         changed_files = self._get_changed_files(path)
         tracked_files = self._get_tracked_files(path)
-
         python_files = [
-            file for file in tracked_files
+            file
+            for file in tracked_files
             if file.endswith(".py") and "__pycache__" not in file
         ]
-
         test_files = [
-            file for file in tracked_files
+            file
+            for file in tracked_files
             if file.startswith("tests/") and file.endswith(".py")
         ]
-
         suspicious_files = self._find_suspicious_files(path, tracked_files)
         syntax_result = self._check_python_syntax(path, python_files)
 
@@ -560,7 +661,7 @@ class ReviewAgent(BaseAgent):
 
         if suspicious_files:
             risks.append("Suspicious generated/cache/large files are tracked:")
-            risks.extend(f"  - {file}" for file in suspicious_files[:10])
+            risks.extend(f" - {file}" for file in suspicious_files[:10])
 
         if not test_files:
             risks.append("No tests detected under tests/.")
@@ -604,23 +705,22 @@ class ReviewAgent(BaseAgent):
 
     def _get_changed_files(self, repo_path: Path) -> list[str]:
         result = self._run_git(repo_path, ["status", "--short"])
+
         if not result:
             return []
 
         files: list[str] = []
-
         for line in result.splitlines():
             file_path = line[3:].strip()
-
             if " -> " in file_path:
                 file_path = file_path.split(" -> ", 1)[1]
-
             files.append(file_path)
 
         return files
 
     def _get_tracked_files(self, repo_path: Path) -> list[str]:
         result = self._run_git(repo_path, ["ls-files"])
+
         if not result:
             return []
 
@@ -632,7 +732,6 @@ class ReviewAgent(BaseAgent):
         tracked_files: list[str],
     ) -> list[str]:
         suspicious: list[str] = []
-
         patterns = [
             "__pycache__",
             ".pytest_cache",

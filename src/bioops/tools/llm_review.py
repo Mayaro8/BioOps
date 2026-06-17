@@ -12,7 +12,6 @@ class LLMReviewTool:
         self.endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
         self.api_key = os.getenv("AZURE_OPENAI_API_KEY")
         self.api_version = os.getenv("AZURE_OPENAI_API_VERSION")
-
         self.deployment = (
             os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT")
             or os.getenv("AZURE_OPENAI_DEPLOYMENT")
@@ -29,7 +28,6 @@ class LLMReviewTool:
         )
 
         self.client = None
-
         if self.enabled:
             self.client = AzureOpenAI(
                 azure_endpoint=self.endpoint,
@@ -39,13 +37,15 @@ class LLMReviewTool:
             )
 
     def review(self, repo_path: str, review: RepoReview) -> str:
+        prompt = self._build_prompt(repo_path, review)
+        return self.review_prompt(prompt)
+
+    def review_prompt(self, prompt: str) -> str:
         if not self.enabled or self.client is None:
             return (
                 "LLM review unavailable: Azure OpenAI environment variables "
                 "are not fully configured."
             )
-
-        prompt = self._build_prompt(repo_path, review)
 
         try:
             response = self.client.chat.completions.create(
@@ -55,10 +55,10 @@ class LLMReviewTool:
                         "role": "system",
                         "content": (
                             "You are a senior bioinformatics platform engineer "
-                            "reviewing code for a multi-agent BioOps assistant. "
-                            "Be concise, practical, and strict. Focus only on "
-                            "the most important architecture, integration, "
-                            "testing, and deployment issues."
+                            "reviewing GitHub pull request patches for a multi-agent "
+                            "BioOps assistant. Be concise, strict, and practical. "
+                            "Focus on logic bugs, unsafe behavior, missing tests, "
+                            "deployment risks, and integration issues."
                         ),
                     },
                     {
@@ -66,7 +66,7 @@ class LLMReviewTool:
                         "content": prompt,
                     },
                 ],
-                max_completion_tokens=500,
+                max_completion_tokens=5000,
             )
         except Exception as error:
             return f"LLM review failed: {type(error).__name__}: {error}"
@@ -77,7 +77,6 @@ class LLMReviewTool:
         changed_files = "\n".join(
             f"- {file_path}" for file_path in review.changed_files
         )
-
         if not changed_files:
             changed_files = "- No changed files detected."
 
@@ -88,12 +87,10 @@ class LLMReviewTool:
             )
             for issue in review.issues
         )
-
         if not deterministic_findings:
             deterministic_findings = "- No deterministic issues found."
 
         diff_text = review.diff_text.strip()
-
         if not diff_text:
             diff_text = (
                 "[No git diff available. Review based on changed files and "
@@ -128,4 +125,4 @@ class LLMReviewTool:
             "Do not invent files or behavior not shown in the diff or findings.",
         ]
 
-        return "\n".join(prompt_lines)  
+        return "\n".join(prompt_lines)
