@@ -16,9 +16,11 @@ Detailed project documentation is available in [`docs/`](docs/):
 - [Задание на практику (Russian)](docs/assignment.md) — Russian version of the document above.
 
 
-# External Testing - Knowledge Agent
+# User guide 
 
-## 2. Main repository components involved
+##1. Knowledge Agent
+
+###2. Main repository components involved
 
 The Knowledge Agent uses these files and modules:
 
