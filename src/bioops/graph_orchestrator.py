@@ -1,9 +1,11 @@
 from typing_extensions import TypedDict
-
 from langgraph.graph import END, START, StateGraph
 
-from bioops.agents.echo_agent import EchoAgent
+from bioops.agents.general_agent import GeneralAgent
 from bioops.agents.knowledge_agent import KnowledgeAgent
+from bioops.agents.cluster_health_agent import ClusterHealthAgent
+from bioops.agents.review_agent import ReviewAgent
+from bioops.tools.llm_router import LLMRouterTool
 
 
 class BioOpsState(TypedDict):
@@ -12,82 +14,79 @@ class BioOpsState(TypedDict):
     response: str
 
 
-echo_agent = EchoAgent()
+general_agent = GeneralAgent()
 knowledge_agent = KnowledgeAgent()
+review_agent = ReviewAgent()
+llm_router_tool = LLMRouterTool()
+
+cluster_health_agent: ClusterHealthAgent | None = None
+
+
+def keyword_route(message: str) -> str:
+    text = message.lower()
+
+    if any(word in text for word in ["review", "pull request", "merge request", "pr", "diff", "code changes"]):
+        return "review"
+
+    if any(word in text for word in ["cluster", "k8s", "kubernetes", "pod", "pods", "health", "logs", "errors"]):
+        return "cluster_health"
+
+    if any(word in text for word in ["pipeline", "step", "docs", "documentation", "bam", "gvcf", "vcf", "explain"]):
+        return "knowledge"
+
+    return "general"
 
 
 def router_node(state: BioOpsState) -> BioOpsState:
-    message = state["message"].lower()
+    try:
+        selected_agent = llm_router_tool.route(state["message"]).agent
+    except Exception:
+        selected_agent = keyword_route(state["message"])
 
-    knowledge_keywords = [
-        "pipeline",
-        "pipeline-v3.0",
-        "step",
-        "steps",
-        "input",
-        "inputs",
-        "output",
-        "outputs",
-        "parameter",
-        "parameters",
-        "docs",
-        "documentation",
-        "repo",
-        "repository",
-        "source",
-        "source code",
-        "how",
-        "explain",
-        "purpose",
-        "logic",
-        "haplotype",
-        "haplotype caller",
-        "bam",
-        "gvcf",
-        "vcf",
-        "variant",
-        "variant calling",
-    ]
+    return {**state, "selected_agent": selected_agent}
 
-    selected_agent = (
-        "knowledge"
-        if any(keyword in message for keyword in knowledge_keywords)
-        else "echo"
-    )
-
-    return {
-        **state,
-        "selected_agent": selected_agent,
-    }
 
 def route_after_router(state: BioOpsState) -> str:
     return state["selected_agent"]
 
 
-def echo_node(state: BioOpsState) -> BioOpsState:
-    response = echo_agent.run(state["message"])
-
-    return {
-        **state,
-        "response": response,
-    }
+def general_node(state: BioOpsState) -> BioOpsState:
+    return {**state, "response": general_agent.run(state["message"])}
 
 
 def knowledge_node(state: BioOpsState) -> BioOpsState:
-    response = knowledge_agent.run(state["message"])
+    return {**state, "response": knowledge_agent.run(state["message"])}
 
-    return {
-        **state,
-        "response": response,
-    }
+
+def cluster_health_node(state: BioOpsState) -> BioOpsState:
+    global cluster_health_agent
+
+    try:
+        if cluster_health_agent is None:
+            cluster_health_agent = ClusterHealthAgent()
+        response = cluster_health_agent.run(state["message"])
+    except Exception as error:
+        response = (
+            "Cluster Health Agent failed to connect to Kubernetes.\n\n"
+            f"Error: {type(error).__name__}: {error}\n\n"
+            "Check Kubernetes access, kubeconfig, and Docker volume mounts."
+        )
+
+    return {**state, "response": response}
+
+
+def review_node(state: BioOpsState) -> BioOpsState:
+    return {**state, "response": review_agent.run(state["message"])}
 
 
 def build_graph():
     graph = StateGraph(BioOpsState)
 
     graph.add_node("router", router_node)
-    graph.add_node("echo", echo_node)
+    graph.add_node("general", general_node)
     graph.add_node("knowledge", knowledge_node)
+    graph.add_node("cluster_health", cluster_health_node)
+    graph.add_node("review", review_node)
 
     graph.add_edge(START, "router")
 
@@ -95,13 +94,17 @@ def build_graph():
         "router",
         route_after_router,
         {
-            "echo": "echo",
+            "general": "general",
             "knowledge": "knowledge",
+            "cluster_health": "cluster_health",
+            "review": "review",
         },
     )
 
-    graph.add_edge("echo", END)
+    graph.add_edge("general", END)
     graph.add_edge("knowledge", END)
+    graph.add_edge("cluster_health", END)
+    graph.add_edge("review", END)
 
     return graph.compile()
 
@@ -112,11 +115,6 @@ class LangGraphOrchestrator:
 
     def route(self, message: str) -> str:
         result = self.graph.invoke(
-            {
-                "message": message,
-                "selected_agent": "",
-                "response": "",
-            }
+            {"message": message, "selected_agent": "", "response": ""}
         )
-
         return result["response"]

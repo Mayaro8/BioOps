@@ -22,14 +22,14 @@ def test_router_selects_echo_for_unrelated_message():
 
     result = router_node(state)
 
-    assert result["selected_agent"] == "echo"
+    assert result["selected_agent"] == "general"
 
 
 def test_route_after_router_returns_selected_agent():
     state = {
         "message": "hello",
-        "selected_agent": "echo",
+        "selected_agent": "general",
         "response": "",
     }
 
-    assert route_after_router(state) == "echo"
+    assert route_after_router(state) == "general"
