@@ -18,9 +18,9 @@ Detailed project documentation is available in [`docs/`](docs/):
 
 # User guide 
 
-##1. Knowledge Agent
+## 1. Knowledge Agent
 
-###2. Main repository components involved
+### 2. Main repository components involved
 
 The Knowledge Agent uses these files and modules:
 
