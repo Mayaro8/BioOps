@@ -306,17 +306,17 @@ Which step takes a gvcf file as input?
 What is the exact cloud cost of pipeline-v3.0?
 ```
 
-## 2. Cluster Health Agent
+# Cluster Health Agent User Guide
 
-The Cluster Health Agent monitors Kubernetes pod health for BioOps pipeline workloads. It provides information about pod status, running pipeline steps, unhealthy pods, recent errors, container failures, and basic runtime metrics.
+## 1. Cluster Health Agent
 
-This agent does **not** create or manage Kubernetes clusters. It connects to an existing cluster using a valid kubeconfig file or in-cluster Kubernetes permissions.
+The Cluster Health Agent monitors Kubernetes pod health for BioOps pipeline workloads. It reports pod status, running pipeline steps, unhealthy pods, recent errors, container failures, and basic runtime metrics.
+
+This agent does **not** create or manage Kubernetes clusters. It connects to an existing Kubernetes cluster using kubeconfig or in-cluster Kubernetes permissions.
 
 ---
 
-### 1. Main Repository Components
-
-The Cluster Health Agent relies on the following files and modules:
+## 2. Main Repository Components
 
 ```text
 src/bioops/main.py
@@ -329,28 +329,25 @@ configs/agents.yaml
 docker-compose.yml
 .env.example
 scripts/run_cluster_health_monitor.sh
+logs/cluster_health_monitor.log
 ```
 
-#### Component Roles
-
-| Component | Role |
-|---|---|
-| `main.py` | Starts the BioOps CLI |
-| `graph_orchestrator.py` | Routes Kubernetes health requests to `ClusterHealthAgent` |
-| `ClusterHealthAgent` | Generates human-readable Kubernetes health reports |
-| `K8sHealthTool` | Connects to Kubernetes and retrieves pod status, labels, logs, and errors |
-| `cluster_health_monitor.py` | Runs scheduled cluster health monitoring jobs |
-| `AlertTool` | Provides operational alerting functionality |
-| `configs/agents.yaml` | Enables and configures the Cluster Health Agent |
-| `docker-compose.yml` | Runs BioOps in Docker and mounts Kubernetes configuration |
-| `.env` | Stores runtime configuration values |
-| `run_cluster_health_monitor.sh` | Convenience script for scheduled health checks |
+| Component                       | Role                                                                         |
+| ------------------------------- | ---------------------------------------------------------------------------- |
+| `main.py`                       | Starts the BioOps CLI                                                        |
+| `graph_orchestrator.py`         | Routes Kubernetes health requests to `ClusterHealthAgent`                    |
+| `ClusterHealthAgent`            | Generates human-readable Kubernetes health reports                           |
+| `K8sHealthTool`                 | Reads pod status, labels, logs, container states, and errors from Kubernetes |
+| `cluster_health_monitor.py`     | Runs the Cluster Health Agent as a non-interactive monitoring job            |
+| `AlertTool`                     | Sends or prints alert messages from the monitor                              |
+| `run_cluster_health_monitor.sh` | Shell script for running scheduled health checks                             |
+| `cluster_health_monitor.log`    | Log file for scheduled monitor output                                        |
+| `docker-compose.yml`            | Runs BioOps in Docker and mounts Kubernetes configuration                    |
+| `.env`                          | Stores local runtime configuration                                           |
 
 ---
 
-### 2. Prerequisites
-
-The following tools are required:
+## 3. Required Tools
 
 ```text
 Git
@@ -361,16 +358,13 @@ A running Kubernetes cluster
 A valid kubeconfig file
 ```
 
-#### Supported Kubernetes Environments
+For local testing, use Minikube or Kind.
 
-- **Local Testing:** Minikube or Kind
-- **External Testing:** Any accessible Kubernetes cluster
-
-> **Note:** The BioOps Docker image does not create Kubernetes clusters automatically.
+For external testing, the tester must already have access to a Kubernetes cluster. The BioOps Docker image does **not** create a Kubernetes cluster automatically.
 
 ---
 
-### 3. Clone the Repository
+## 4. Clone the Repository
 
 ```bash
 git clone https://github.com/Mayaro8/BioOps.git
@@ -379,7 +373,7 @@ cd BioOps
 
 ---
 
-### 4. Configure Environment Variables
+## 5. Configure Environment Variables
 
 Create a local `.env` file:
 
@@ -387,15 +381,17 @@ Create a local `.env` file:
 cp .env.example .env
 ```
 
-Edit the file if necessary:
+Edit it:
 
 ```bash
 nano .env
 ```
 
-The Cluster Health Agent primarily requires Kubernetes access. Azure OpenAI settings are only needed when using LLM-based routing or fallback agents.
+The Cluster Health Agent mainly needs Kubernetes access.
 
-#### Example Configuration
+Azure OpenAI variables are only needed if the LLM router or general fallback agent is enabled.
+
+Example:
 
 ```bash
 AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
@@ -406,24 +402,24 @@ AZURE_OPENAI_CHAT_DEPLOYMENT=your_chat_deployment
 
 ---
 
-### 5. Prepare a Kubernetes Cluster
+## 6. Prepare a Kubernetes Cluster
 
-#### Start Minikube
+For local testing with Minikube:
 
 ```bash
 minikube start
 kubectl get nodes
 ```
 
-#### Create the BioOps Namespace
+Create the BioOps namespace:
 
 ```bash
 kubectl create namespace bioops
 ```
 
-If the namespace already exists, Kubernetes may return an error. This is expected and can be ignored.
+If the namespace already exists, Kubernetes may return an error. This can be ignored.
 
-Verify the namespace:
+Check the namespace:
 
 ```bash
 kubectl get namespaces
@@ -431,9 +427,9 @@ kubectl get namespaces
 
 ---
 
-### 6. Create Example Test Pods
+## 7. Create Example Test Pods
 
-#### Create a Healthy Pod
+Create a healthy pod:
 
 ```bash
 kubectl run bam-to-gvcf-worker \
@@ -443,7 +439,7 @@ kubectl run bam-to-gvcf-worker \
   --command -- sleep 3600
 ```
 
-#### Create a Failing Pod
+Create a failing pod:
 
 ```bash
 kubectl run gvcf-to-vcf-worker \
@@ -453,32 +449,28 @@ kubectl run gvcf-to-vcf-worker \
   --command -- sh -c "echo simulated failure; exit 1"
 ```
 
-#### Verify Pod Status
+Check pods:
 
 ```bash
 kubectl get pods -n bioops
 ```
 
-Expected output:
+Expected shape:
 
 ```text
 bam-to-gvcf-worker     Running
 gvcf-to-vcf-worker     Error
 ```
 
-> Output formatting may vary depending on the Kubernetes version.
-
 ---
 
-### 7. Build the Docker Image
-
-Build the BioOps image:
+## 8. Build Docker Image
 
 ```bash
 docker compose build bioops
 ```
 
-If dependency or import issues occur, rebuild without cache:
+If imports or dependencies fail:
 
 ```bash
 docker compose build --no-cache bioops
@@ -486,15 +478,13 @@ docker compose build --no-cache bioops
 
 ---
 
-### 8. Start the BioOps CLI
-
-Run the CLI:
+## 9. Start the BioOps CLI
 
 ```bash
 docker compose run --rm bioops python -m bioops.main
 ```
 
-Expected startup message:
+Expected startup:
 
 ```text
 BioOps CLI started. Type 'exit' to quit.
@@ -503,11 +493,9 @@ You:
 
 ---
 
-### 9. Cluster Health Agent Prompts
+## 10. Cluster Health Agent CLI Prompts
 
-Use the following prompts inside the BioOps CLI.
-
-#### Basic Health Checks
+Use these prompts inside the CLI.
 
 ```text
 Check Kubernetes cluster health.
@@ -525,8 +513,6 @@ Are any pods failing?
 Show unhealthy pipeline workers.
 ```
 
-#### Pipeline Step Queries
-
 ```text
 Which pipeline steps are running?
 ```
@@ -540,12 +526,6 @@ Is gvcf to vcf failing?
 ```
 
 ```text
-Which pods belong to which pipeline steps?
-```
-
-#### Error and Log Analysis
-
-```text
 Show recent Kubernetes errors.
 ```
 
@@ -553,19 +533,11 @@ Show recent Kubernetes errors.
 Check pod logs for failures.
 ```
 
-```text
-Why did the gvcf to vcf pod fail?
-```
-
-```text
-Summarize unhealthy containers.
-```
-
 ---
 
-### 10. Expected Output
+## 11. Expected CLI Output
 
-A typical response may look similar to:
+Example shape:
 
 ```text
 Cluster Health Report
@@ -582,43 +554,210 @@ Recent errors:
 - gvcf-to-vcf-worker terminated with exit code 1
 ```
 
-Actual output may vary depending on the implementation and cluster state.
+Actual output may differ depending on the current cluster state.
 
 ---
 
-### 11. Docker and kubeconfig Notes
+# Health Monitor
 
-The Docker container must have access to Kubernetes configuration files.
+## 12. What the Health Monitor Does
 
-Expected mounts:
+The Health Monitor is the non-interactive monitoring layer for the Cluster Health Agent.
+
+Unlike the BioOps CLI, it does **not** require a user prompt. It is designed to run from a script or cron job and automatically check Kubernetes cluster health at regular intervals.
+
+Flow:
 
 ```text
-~/.kube mounted into the container
-~/.minikube mounted into the container when using Minikube
+cron or shell command
+    ↓
+scripts/run_cluster_health_monitor.sh
+    ↓
+python -m bioops.jobs.cluster_health_monitor
+    ↓
+ClusterHealthAgent
+    ↓
+K8sHealthTool
+    ↓
+cluster health report text
+    ↓
+AlertTool
+    ↓
+terminal output / log file / optional webhook alert
 ```
 
-#### Troubleshooting Connectivity Issues
+---
 
-Run the following checks:
+## 13. Run Health Monitor Manually
+
+From the repository root:
+
+```bash
+bash scripts/run_cluster_health_monitor.sh
+```
+
+Or directly through Docker:
+
+```bash
+docker compose run --rm bioops python -m bioops.jobs.cluster_health_monitor
+```
+
+This does not require typing a prompt into the BioOps CLI.
+
+---
+
+## 14. Run Health Monitor on a Schedule
+
+Example cron entry for running every 3 hours:
+
+```cron
+0 */3 * * * cd /home/mayar/bio-ops && bash scripts/run_cluster_health_monitor.sh >> logs/cluster_health_monitor.log 2>&1
+```
+
+This means:
+
+```text
+Every 3 hours
+    ↓
+run the Health Monitor script
+    ↓
+write output to logs/cluster_health_monitor.log
+    ↓
+send alert through AlertTool if configured
+```
+
+---
+
+## 15. Bitrix24 Webhook Alerts
+
+The Health Monitor can optionally send the cluster health report to Bitrix24.
+
+Bitrix24 is **optional**. The monitor should still work without it.
+
+Alert flow:
+
+```text
+Health Monitor output
+    ↓
+AlertTool
+    ↓
+Bitrix24 webhook
+    ↓
+Bitrix24 chat message
+```
+
+---
+
+## 16. Bitrix24 Environment Variables
+
+Store webhook settings in `.env`.
+
+Example:
+
+```bash
+BIOOPS_ALERT_WEBHOOK_URL=https://your-domain.bitrix24.com/rest/<user_id>/<webhook_code>/im.message.add
+BIOOPS_ALERT_DIALOG_ID=chat123
+```
+
+| Variable                   | Role                           |
+| -------------------------- | ------------------------------ |
+| `BIOOPS_ALERT_WEBHOOK_URL` | Bitrix24 REST webhook endpoint |
+| `BIOOPS_ALERT_DIALOG_ID`   | Target Bitrix24 chat/dialog ID |
+
+The webhook URL contains a secret token. Do **not** commit it.
+
+---
+
+## 17. Bitrix24 Message Shape
+
+The alert payload should look like this:
+
+```json
+{
+  "DIALOG_ID": "chat123",
+  "MESSAGE": "Cluster Health Report\n\nTotal pods: 2\nRunning pods: 1\nUnhealthy pods: 1"
+}
+```
+
+`DIALOG_ID` tells Bitrix24 where to post the message.
+
+`MESSAGE` contains the health report generated by BioOps.
+
+---
+
+## 18. Behavior Without Bitrix24
+
+If `BIOOPS_ALERT_WEBHOOK_URL` is not configured, the Health Monitor should still run normally.
+
+Expected behavior:
+
+```text
+Cluster health check runs
+Health report is generated
+Bitrix24 alert is skipped
+Output is written to terminal or logs/cluster_health_monitor.log
+```
+
+So without Bitrix24:
+
+```text
+No Bitrix24 message is sent.
+The monitor should not crash.
+The health report should still appear in logs.
+```
+
+This is useful for local testing, external testing, and environments where Bitrix24 alerting is not available.
+
+---
+
+## 19. Expected Health Monitor Behavior
+
+The monitor should:
+
+```text
+Check Kubernetes pod health
+Detect unhealthy or failed pods
+Collect recent error information
+Generate a cluster health summary
+Send the summary through AlertTool
+Post to Bitrix24 only if webhook variables are configured
+Write output to logs/cluster_health_monitor.log
+```
+
+---
+
+## 20. Troubleshooting
+
+| Problem                   | Likely Cause                                               |
+| ------------------------- | ---------------------------------------------------------- |
+| `No route to host`        | Minikube is stopped or Docker cannot reach the cluster     |
+| kubeconfig error          | kubeconfig is not mounted into the container               |
+| no pods found             | Wrong namespace or no test pods exist                      |
+| permission denied         | Kubernetes RBAC does not allow pod/log reads               |
+| no Bitrix24 message       | Webhook URL or dialog ID is missing                        |
+| monitor runs but no alert | AlertTool skipped webhook because configuration is missing |
+
+Check Kubernetes directly:
 
 ```bash
 kubectl get pods -n bioops
-docker compose run --rm bioops python -m pytest
-docker compose run --rm bioops python -m bioops.main
 ```
 
-#### Common Issues
+Check Docker execution:
 
-| Problem | Likely Cause |
-|---|---|
-| `No route to host` | Minikube is stopped or Docker cannot reach the cluster |
-| kubeconfig error | kubeconfig is not mounted into the container |
-| no pods found | Incorrect namespace or missing test pods |
-| permission denied | Kubernetes RBAC prevents pod or log access |
+```bash
+docker compose run --rm bioops python -m bioops.jobs.cluster_health_monitor
+```
+
+Check logs:
+
+```bash
+cat logs/cluster_health_monitor.log
+```
 
 ---
 
-### 12. Quick Start Command Sequence
+## 21. Minimal Local Test Sequence
 
 ```bash
 git clone https://github.com/Mayaro8/BioOps.git
@@ -643,25 +782,12 @@ kubectl run gvcf-to-vcf-worker \
 
 docker compose build bioops
 docker compose run --rm bioops python -m pytest
-docker compose run --rm bioops python -m bioops.main
-```
-
-#### Test Prompts
-
-Once the CLI starts, try:
-
-```text
-Check Kubernetes cluster health.
-Are any pods failing?
-Which pipeline steps are running?
-Show recent Kubernetes errors.
+docker compose run --rm bioops python -m bioops.jobs.cluster_health_monitor
 ```
 
 ---
 
-### 13. Clean Up Test Resources
-
-Delete the test pods after validation:
+## 22. Clean Up Test Resources
 
 ```bash
 kubectl delete pod bam-to-gvcf-worker -n bioops
