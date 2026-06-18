@@ -20,7 +20,7 @@ Detailed project documentation is available in [`docs/`](docs/):
 
 ## 1. Knowledge Agent
 
-### 2. Main repository components involved
+### 1. Main repository components involved
 
 The Knowledge Agent uses these files and modules:
 
@@ -57,7 +57,7 @@ Component roles:
 
 ---
 
-### 3. Required tools for use
+### 2. Required tools for use
 
 ```text
 Git
@@ -70,14 +70,14 @@ The project is expected to run through Docker Compose. We do not need to manuall
 
 ---
 
-### 4. Clone the repository
+### 3. Clone the repository
 
 ```bash
 git clone https://github.com/Mayaro8/BioOps.git
 cd BioOps
 ```
 
-### 5. Configure environment variables
+### 4. Configure environment variables
 
 Create a local `.env` file from the example file:
 
@@ -108,7 +108,7 @@ QDRANT_COLLECTION=bioops_knowledge
 
 ---
 
-### 6. Build Docker image and start Qdrant
+### 5. Build Docker image and start Qdrant
 
 Build the BioOps image:
 
@@ -138,7 +138,7 @@ The exact formatting may differ by Docker Compose version.
 
 ---
 
-### 7. Document ingestion warning
+### 6. Document ingestion warning
 
 The ingestion pipeline scans files in the `docs/` directory.
 
@@ -161,7 +161,7 @@ docs/pipeline_metadata.yaml
 
 ---
 
-### 8. Ingest documentation into Qdrant
+### 7. Ingest documentation into Qdrant
 
 Before the Knowledge Agent can answer from documentation, the docs need to be embedded and inserted into Qdrant.
 
@@ -184,7 +184,7 @@ The exact number of chunks may differ depending on the current `docs/` contents.
 ---
 
 
-### 9. Start the BioOps CLI
+### 8. Start the BioOps CLI
 
 Run:
 
@@ -213,7 +213,7 @@ docker compose run --rm bioops python -m bioops.main
 
 ---
 
-### 10. Knowledge Agent prompts
+### 9. Knowledge Agent prompts
 
 Use the following prompts inside the CLI.
 
@@ -279,7 +279,7 @@ What does the indexed knowledge base say about pipeline-v3.0?
 
 ---
 
-### 11. Minimal command sequence
+### 10. Minimal command sequence
 
 For convenience, the full minimal sequence for testing and then trying is:
 
