@@ -218,7 +218,7 @@ Whether ingestion was already performed
 
 ---
 
-## 10. Start the BioOps CLI
+## 9. Start the BioOps CLI
 
 Run:
 
@@ -247,7 +247,7 @@ docker compose run --rm bioops python -m bioops.main
 
 ---
 
-## 11. Test Knowledge Agent prompts
+## 10. Test Knowledge Agent prompts
 
 Use the following prompts inside the CLI.
 
@@ -311,7 +311,7 @@ Based on the indexed documentation, what does bam to gvcf output?
 What does the indexed knowledge base say about pipeline-v3.0?
 ```
 
-## 17. Example final test report
+## 11. Example final test report
 
 ```text
 Repository: https://github.com/Mayaro8/BioOps
@@ -338,7 +338,7 @@ None.
 
 ---
 
-## 18. Minimal command sequence
+## 12. Minimal command sequence
 
 For convenience, the full minimal test sequence is:
 
