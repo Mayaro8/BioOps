@@ -183,40 +183,6 @@ The exact number of chunks may differ depending on the current `docs/` contents.
 
 ---
 
-### 9. Run automated tests
-
-Run the test suite:
-
-```bash
-docker compose run --rm bioops python -m pytest
-```
-
-Expected result:
-
-```text
-passed
-```
-
-Important note:
-
-```text
-Pytest validates the current unit tests in the repository.
-It does not fully prove the end-to-end RAG workflow.
-Full Knowledge Agent validation still requires manual CLI testing after documentation ingestion.
-```
-
-If tests fail, record:
-
-```text
-The failing test name
-The command used
-The full traceback
-Whether `.env` was configured
-Whether Qdrant was running
-Whether ingestion was already performed
-```
-
----
 
 ### 9. Start the BioOps CLI
 
