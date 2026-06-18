@@ -1,8 +1,7 @@
 from typing_extensions import TypedDict
-
 from langgraph.graph import END, START, StateGraph
 
-from bioops.agents.echo_agent import EchoAgent
+from bioops.agents.general_agent import GeneralAgent
 from bioops.agents.knowledge_agent import KnowledgeAgent
 from bioops.agents.cluster_health_agent import ClusterHealthAgent
 from bioops.agents.review_agent import ReviewAgent
@@ -10,6 +9,7 @@ from bioops.agents.batch_status_agent import BatchStatusAgent
 from bioops.agents.submit_master_agent import SubmitMasterAgent
 from bioops.agents.storage_agent import StorageAgent
 from bioops.agents.infra_cost_agent import InfraCostAgent
+from bioops.tools.llm_router import LLMRouterTool
 
 
 class BioOpsState(TypedDict):
@@ -18,22 +18,21 @@ class BioOpsState(TypedDict):
     response: str
 
 
-echo_agent = EchoAgent()
+general_agent = GeneralAgent()
 knowledge_agent = KnowledgeAgent()
 review_agent = ReviewAgent()
 submit_master_agent = SubmitMasterAgent()
 storage_agent = StorageAgent()
 infra_cost_agent = InfraCostAgent()
+llm_router_tool = LLMRouterTool()
 
 # Lazy-loaded so pytest/imports do not load Kubernetes config immediately.
 cluster_health_agent: ClusterHealthAgent | None = None
 batch_status_agent: BatchStatusAgent | None = None
 
 
-def router_node(state: BioOpsState) -> BioOpsState:
-    message = state["message"].lower()
-
-    message_tokens = set(
+def _message_tokens(message: str) -> set[str]:
+    return set(
         message.replace("/", " ")
         .replace("-", " ")
         .replace("_", " ")
@@ -41,6 +40,13 @@ def router_node(state: BioOpsState) -> BioOpsState:
         .replace(",", " ")
         .split()
     )
+
+
+def keyword_route(message: str) -> str:
+    """Deterministic fallback router used when LLM routing is unavailable."""
+
+    normalized_message = message.lower()
+    message_tokens = _message_tokens(normalized_message)
 
     submit_master_keywords = [
         "submit master",
@@ -127,7 +133,10 @@ def router_node(state: BioOpsState) -> BioOpsState:
         "status",
         "statuses",
         "eta",
-        "cost",
+        "worker",
+        "workers",
+        "container",
+        "containers",
     ]
 
     review_keywords = [
@@ -173,25 +182,42 @@ def router_node(state: BioOpsState) -> BioOpsState:
         "variant calling",
     ]
 
-    if any(keyword in message for keyword in submit_master_keywords):
-        selected_agent = "submit_master"
-    elif any(keyword in message for keyword in storage_keywords):
-        selected_agent = "storage"
-    elif any(keyword in message for keyword in infra_cost_keywords):
-        selected_agent = "infra_cost"
-    elif any(keyword in message for keyword in batch_status_keywords):
-        selected_agent = "batch_status"
-    elif any(keyword in message for keyword in cluster_health_keywords):
-        selected_agent = "cluster_health"
-    elif (
-        any(keyword in message for keyword in review_keywords)
-        or bool(review_tokens.intersection(message_tokens))
+    if any(keyword in normalized_message for keyword in submit_master_keywords):
+        return "submit_master"
+
+    if any(keyword in normalized_message for keyword in storage_keywords):
+        return "storage"
+
+    if any(keyword in normalized_message for keyword in infra_cost_keywords):
+        return "infra_cost"
+
+    if any(keyword in normalized_message for keyword in batch_status_keywords):
+        return "batch_status"
+
+    if any(keyword in normalized_message for keyword in cluster_health_keywords):
+        return "cluster_health"
+
+    if any(keyword in normalized_message for keyword in review_keywords) or bool(
+        review_tokens.intersection(message_tokens)
     ):
-        selected_agent = "review"
-    elif any(keyword in message for keyword in knowledge_keywords):
-        selected_agent = "knowledge"
-    else:
-        selected_agent = "echo"
+        return "review"
+
+    if any(keyword in normalized_message for keyword in knowledge_keywords):
+        return "knowledge"
+
+    return "general"
+
+
+def router_node(state: BioOpsState) -> BioOpsState:
+    """Route through LLM first, then fall back to deterministic routing."""
+
+    message = state["message"]
+
+    try:
+        decision = llm_router_tool.route(message)
+        selected_agent = decision.agent
+    except Exception:
+        selected_agent = keyword_route(message)
 
     return {
         **state,
@@ -203,9 +229,8 @@ def route_after_router(state: BioOpsState) -> str:
     return state["selected_agent"]
 
 
-def echo_node(state: BioOpsState) -> BioOpsState:
-    response = echo_agent.run(state["message"])
-
+def general_node(state: BioOpsState) -> BioOpsState:
+    response = general_agent.run(state["message"])
     return {
         **state,
         "response": response,
@@ -214,7 +239,6 @@ def echo_node(state: BioOpsState) -> BioOpsState:
 
 def knowledge_node(state: BioOpsState) -> BioOpsState:
     response = knowledge_agent.run(state["message"])
-
     return {
         **state,
         "response": response,
@@ -244,7 +268,6 @@ def cluster_health_node(state: BioOpsState) -> BioOpsState:
 
 def review_node(state: BioOpsState) -> BioOpsState:
     response = review_agent.run(state["message"])
-
     return {
         **state,
         "response": response,
@@ -274,7 +297,6 @@ def batch_status_node(state: BioOpsState) -> BioOpsState:
 
 def submit_master_node(state: BioOpsState) -> BioOpsState:
     response = submit_master_agent.run(state["message"])
-
     return {
         **state,
         "response": response,
@@ -283,7 +305,6 @@ def submit_master_node(state: BioOpsState) -> BioOpsState:
 
 def storage_node(state: BioOpsState) -> BioOpsState:
     response = storage_agent.run(state["message"])
-
     return {
         **state,
         "response": response,
@@ -292,7 +313,6 @@ def storage_node(state: BioOpsState) -> BioOpsState:
 
 def infra_cost_node(state: BioOpsState) -> BioOpsState:
     response = infra_cost_agent.run(state["message"])
-
     return {
         **state,
         "response": response,
@@ -303,7 +323,7 @@ def build_graph():
     graph = StateGraph(BioOpsState)
 
     graph.add_node("router", router_node)
-    graph.add_node("echo", echo_node)
+    graph.add_node("general", general_node)
     graph.add_node("knowledge", knowledge_node)
     graph.add_node("cluster_health", cluster_health_node)
     graph.add_node("review", review_node)
@@ -318,7 +338,7 @@ def build_graph():
         "router",
         route_after_router,
         {
-            "echo": "echo",
+            "general": "general",
             "knowledge": "knowledge",
             "cluster_health": "cluster_health",
             "review": "review",
@@ -329,7 +349,7 @@ def build_graph():
         },
     )
 
-    graph.add_edge("echo", END)
+    graph.add_edge("general", END)
     graph.add_edge("knowledge", END)
     graph.add_edge("cluster_health", END)
     graph.add_edge("review", END)
