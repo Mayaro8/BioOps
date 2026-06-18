@@ -57,9 +57,7 @@ Component roles:
 
 ---
 
-## 3. Required tools for external testers
-
-External testers need:
+### 3. Required tools for use
 
 ```text
 Git
@@ -68,18 +66,18 @@ Docker Compose
 A valid Azure OpenAI configuration
 ```
 
-The project is expected to run through Docker Compose. Testers do not need to manually install Python packages on the host machine if they use Docker.
+The project is expected to run through Docker Compose. We do not need to manually install Python packages on the host machine if they use Docker.
 
 ---
 
-## 4. Clone the repository
+### 4. Clone the repository
 
 ```bash
 git clone https://github.com/Mayaro8/BioOps.git
 cd BioOps
 ```
 
-## 5. Configure environment variables
+### 5. Configure environment variables
 
 Create a local `.env` file from the example file:
 
@@ -110,7 +108,7 @@ QDRANT_COLLECTION=bioops_knowledge
 
 ---
 
-## 6. Build Docker image and start Qdrant
+### 6. Build Docker image and start Qdrant
 
 Build the BioOps image:
 
@@ -140,7 +138,7 @@ The exact formatting may differ by Docker Compose version.
 
 ---
 
-## 7. Document ingestion warning
+### 7. Document ingestion warning
 
 The ingestion pipeline scans files in the `docs/` directory.
 
@@ -163,7 +161,7 @@ docs/pipeline_metadata.yaml
 
 ---
 
-## 8. Ingest documentation into Qdrant
+### 8. Ingest documentation into Qdrant
 
 Before the Knowledge Agent can answer from documentation, the docs need to be embedded and inserted into Qdrant.
 
@@ -185,7 +183,7 @@ The exact number of chunks may differ depending on the current `docs/` contents.
 
 ---
 
-## 9. Run automated tests
+### 9. Run automated tests
 
 Run the test suite:
 
@@ -220,7 +218,7 @@ Whether ingestion was already performed
 
 ---
 
-## 9. Start the BioOps CLI
+### 9. Start the BioOps CLI
 
 Run:
 
@@ -249,11 +247,11 @@ docker compose run --rm bioops python -m bioops.main
 
 ---
 
-## 10. Test Knowledge Agent prompts
+### 10. Knowledge Agent prompts
 
 Use the following prompts inside the CLI.
 
-### Basic pipeline questions
+#### Basic pipeline questions
 
 ```text
 Explain pipeline-v3.0 steps.
@@ -267,7 +265,7 @@ What are the steps in pipeline-v3.0?
 List the pipeline steps in order.
 ```
 
-### Step-specific questions
+#### Step-specific questions
 
 ```text
 What does bam to gvcf do?
@@ -289,7 +287,7 @@ What does gvcf to vcf do?
 What is the output of gvcf to vcf?
 ```
 
-### Connection questions
+#### Connection questions
 
 ```text
 How are bam to gvcf and gvcf to vcf connected?
@@ -303,7 +301,7 @@ Which step takes a gvcf file as input?
 Which step produces a vcf file?
 ```
 
-### Source-grounding questions
+#### Source-grounding questions
 
 ```text
 Based on the indexed documentation, what does bam to gvcf output?
@@ -313,36 +311,11 @@ Based on the indexed documentation, what does bam to gvcf output?
 What does the indexed knowledge base say about pipeline-v3.0?
 ```
 
-## 11. Example final test report
-
-```text
-Repository: https://github.com/Mayaro8/BioOps
-Branch tested: main
-Commit: abc1234
-Environment: Ubuntu 22.04, Docker Compose
-Qdrant: started successfully
-Ingestion: completed
-Pytest: passed
-CLI: started successfully
-
-Prompts tested:
-1. Explain pipeline-v3.0 steps.
-2. What does bam to gvcf output?
-3. Which step takes a gvcf file as input?
-4. What is the exact cloud cost of pipeline-v3.0?
-
-Result:
-The Knowledge Agent answered indexed pipeline questions correctly and avoided inventing unsupported cloud cost information.
-
-Issues:
-None.
-```
-
 ---
 
-## 12. Minimal command sequence
+### 11. Minimal command sequence
 
-For convenience, the full minimal test sequence is:
+For convenience, the full minimal sequence for testing and then trying is:
 
 ```bash
 git clone https://github.com/Mayaro8/BioOps.git
