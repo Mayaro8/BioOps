@@ -305,3 +305,682 @@ What does bam to gvcf output?
 Which step takes a gvcf file as input?
 What is the exact cloud cost of pipeline-v3.0?
 ```
+
+## 2. Cluster Health Agent
+
+The Cluster Health Agent monitors Kubernetes pod health for BioOps pipeline workloads. It provides information about pod status, running pipeline steps, unhealthy pods, recent errors, container failures, and basic runtime metrics.
+
+This agent does **not** create or manage Kubernetes clusters. It connects to an existing cluster using a valid kubeconfig file or in-cluster Kubernetes permissions.
+
+---
+
+### 1. Main Repository Components
+
+The Cluster Health Agent relies on the following files and modules:
+
+```text
+src/bioops/main.py
+src/bioops/graph_orchestrator.py
+src/bioops/agents/cluster_health_agent.py
+src/bioops/tools/k8s_health.py
+src/bioops/jobs/cluster_health_monitor.py
+src/bioops/tools/alert_tool.py
+configs/agents.yaml
+docker-compose.yml
+.env.example
+scripts/run_cluster_health_monitor.sh
+```
+
+#### Component Roles
+
+| Component | Role |
+|---|---|
+| `main.py` | Starts the BioOps CLI |
+| `graph_orchestrator.py` | Routes Kubernetes health requests to `ClusterHealthAgent` |
+| `ClusterHealthAgent` | Generates human-readable Kubernetes health reports |
+| `K8sHealthTool` | Connects to Kubernetes and retrieves pod status, labels, logs, and errors |
+| `cluster_health_monitor.py` | Runs scheduled cluster health monitoring jobs |
+| `AlertTool` | Provides operational alerting functionality |
+| `configs/agents.yaml` | Enables and configures the Cluster Health Agent |
+| `docker-compose.yml` | Runs BioOps in Docker and mounts Kubernetes configuration |
+| `.env` | Stores runtime configuration values |
+| `run_cluster_health_monitor.sh` | Convenience script for scheduled health checks |
+
+---
+
+### 2. Prerequisites
+
+The following tools are required:
+
+```text
+Git
+Docker
+Docker Compose
+kubectl
+A running Kubernetes cluster
+A valid kubeconfig file
+```
+
+#### Supported Kubernetes Environments
+
+- **Local Testing:** Minikube or Kind
+- **External Testing:** Any accessible Kubernetes cluster
+
+> **Note:** The BioOps Docker image does not create Kubernetes clusters automatically.
+
+---
+
+### 3. Clone the Repository
+
+```bash
+git clone https://github.com/Mayaro8/BioOps.git
+cd BioOps
+```
+
+---
+
+### 4. Configure Environment Variables
+
+Create a local `.env` file:
+
+```bash
+cp .env.example .env
+```
+
+Edit the file if necessary:
+
+```bash
+nano .env
+```
+
+The Cluster Health Agent primarily requires Kubernetes access. Azure OpenAI settings are only needed when using LLM-based routing or fallback agents.
+
+#### Example Configuration
+
+```bash
+AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
+AZURE_OPENAI_API_KEY=your_azure_openai_key
+AZURE_OPENAI_API_VERSION=2024-02-01
+AZURE_OPENAI_CHAT_DEPLOYMENT=your_chat_deployment
+```
+
+---
+
+### 5. Prepare a Kubernetes Cluster
+
+#### Start Minikube
+
+```bash
+minikube start
+kubectl get nodes
+```
+
+#### Create the BioOps Namespace
+
+```bash
+kubectl create namespace bioops
+```
+
+If the namespace already exists, Kubernetes may return an error. This is expected and can be ignored.
+
+Verify the namespace:
+
+```bash
+kubectl get namespaces
+```
+
+---
+
+### 6. Create Example Test Pods
+
+#### Create a Healthy Pod
+
+```bash
+kubectl run bam-to-gvcf-worker \
+  --image=busybox \
+  --namespace=bioops \
+  --labels=pipeline_step=bam-to-gvcf \
+  --command -- sleep 3600
+```
+
+#### Create a Failing Pod
+
+```bash
+kubectl run gvcf-to-vcf-worker \
+  --image=busybox \
+  --namespace=bioops \
+  --labels=pipeline_step=gvcf-to-vcf \
+  --command -- sh -c "echo simulated failure; exit 1"
+```
+
+#### Verify Pod Status
+
+```bash
+kubectl get pods -n bioops
+```
+
+Expected output:
+
+```text
+bam-to-gvcf-worker     Running
+gvcf-to-vcf-worker     Error
+```
+
+> Output formatting may vary depending on the Kubernetes version.
+
+---
+
+### 7. Build the Docker Image
+
+Build the BioOps image:
+
+```bash
+docker compose build bioops
+```
+
+If dependency or import issues occur, rebuild without cache:
+
+```bash
+docker compose build --no-cache bioops
+```
+
+---
+
+### 8. Start the BioOps CLI
+
+Run the CLI:
+
+```bash
+docker compose run --rm bioops python -m bioops.main
+```
+
+Expected startup message:
+
+```text
+BioOps CLI started. Type 'exit' to quit.
+You:
+```
+
+---
+
+### 9. Cluster Health Agent Prompts
+
+Use the following prompts inside the BioOps CLI.
+
+#### Basic Health Checks
+
+```text
+Check Kubernetes cluster health.
+```
+
+```text
+Check k8s pod status.
+```
+
+```text
+Are any pods failing?
+```
+
+```text
+Show unhealthy pipeline workers.
+```
+
+#### Pipeline Step Queries
+
+```text
+Which pipeline steps are running?
+```
+
+```text
+Is bam to gvcf running?
+```
+
+```text
+Is gvcf to vcf failing?
+```
+
+```text
+Which pods belong to which pipeline steps?
+```
+
+#### Error and Log Analysis
+
+```text
+Show recent Kubernetes errors.
+```
+
+```text
+Check pod logs for failures.
+```
+
+```text
+Why did the gvcf to vcf pod fail?
+```
+
+```text
+Summarize unhealthy containers.
+```
+
+---
+
+### 10. Expected Output
+
+A typical response may look similar to:
+
+```text
+Cluster Health Report
+
+Total pods: 2
+Running pods: 1
+Unhealthy pods: 1
+
+Pods:
+- bam-to-gvcf: bam-to-gvcf-worker [Running]
+- gvcf-to-vcf: gvcf-to-vcf-worker [Error]
+
+Recent errors:
+- gvcf-to-vcf-worker terminated with exit code 1
+```
+
+Actual output may vary depending on the implementation and cluster state.
+
+---
+
+### 11. Docker and kubeconfig Notes
+
+The Docker container must have access to Kubernetes configuration files.
+
+Expected mounts:
+
+```text
+~/.kube mounted into the container
+~/.minikube mounted into the container when using Minikube
+```
+
+#### Troubleshooting Connectivity Issues
+
+Run the following checks:
+
+```bash
+kubectl get pods -n bioops
+docker compose run --rm bioops python -m pytest
+docker compose run --rm bioops python -m bioops.main
+```
+
+#### Common Issues
+
+| Problem | Likely Cause |
+|---|---|
+| `No route to host` | Minikube is stopped or Docker cannot reach the cluster |
+| kubeconfig error | kubeconfig is not mounted into the container |
+| no pods found | Incorrect namespace or missing test pods |
+| permission denied | Kubernetes RBAC prevents pod or log access |
+
+---
+
+### 12. Quick Start Command Sequence
+
+```bash
+git clone https://github.com/Mayaro8/BioOps.git
+cd BioOps
+
+cp .env.example .env
+
+minikube start
+kubectl create namespace bioops
+
+kubectl run bam-to-gvcf-worker \
+  --image=busybox \
+  --namespace=bioops \
+  --labels=pipeline_step=bam-to-gvcf \
+  --command -- sleep 3600
+
+kubectl run gvcf-to-vcf-worker \
+  --image=busybox \
+  --namespace=bioops \
+  --labels=pipeline_step=gvcf-to-vcf \
+  --command -- sh -c "echo simulated failure; exit 1"
+
+docker compose build bioops
+docker compose run --rm bioops python -m pytest
+docker compose run --rm bioops python -m bioops.main
+```
+
+#### Test Prompts
+
+Once the CLI starts, try:
+
+```text
+Check Kubernetes cluster health.
+Are any pods failing?
+Which pipeline steps are running?
+Show recent Kubernetes errors.
+```
+
+---
+
+### 13. Clean Up Test Resources
+
+Delete the test pods after validation:
+
+```bash
+kubectl delete pod bam-to-gvcf-worker -n bioops
+kubectl delete pod gvcf-to-vcf-worker -n bioops
+```
+
+
+## 3 Review Agent User Guide
+
+### 1. Review Agent
+
+The Review Agent checks BioOps repositories, GitHub pull requests, open PRs, and branch comparisons. It produces a read-only review report with changed files, deterministic risks, style or logic remarks, suggestions, and optional LLM patch review.
+
+The Review Agent does **not** post GitHub comments, does **not** approve pull requests, does **not** modify PR status, and does **not** change repository files.
+
+---
+
+### 2. Main Repository Components
+
+The Review Agent uses these files and modules:
+
+```text
+src/bioops/main.py
+src/bioops/graph_orchestrator.py
+src/bioops/agents/review_agent.py
+src/bioops/tools/github_review_tool.py
+src/bioops/tools/llm_review.py
+configs/agents.yaml
+docker-compose.yml
+.env.example
+requirements.txt
+```
+
+#### Component Roles
+
+| Component | Role |
+|---|---|
+| `main.py` | Starts the BioOps CLI |
+| `graph_orchestrator.py` | Routes repository, PR, diff, and code-review requests to `ReviewAgent` |
+| `ReviewAgent` | Coordinates local repo review, GitHub repo review, PR review, branch comparison, and report formatting |
+| `GitHubReviewTool` | Parses review requests and fetches GitHub repository, PR, and branch comparison data |
+| `LLMReviewTool` | Uses Azure OpenAI to perform optional patch-level review |
+| `configs/agents.yaml` | Enables and describes the Review Agent |
+| `docker-compose.yml` | Runs BioOps through Docker |
+| `.env` | Provides GitHub and Azure OpenAI configuration |
+| `requirements.txt` | Includes GitHub/OpenAI dependencies |
+
+---
+
+### 3. Prerequisites
+
+The following tools are required:
+
+```text
+Git
+Docker
+Docker Compose
+A GitHub personal access token for GitHub PR/repo review
+A valid Azure OpenAI configuration for LLM patch review
+```
+
+Local repository review can run without GitHub credentials.
+
+GitHub PR review needs:
+
+```text
+GITHUB_TOKEN
+```
+
+LLM patch review needs Azure OpenAI chat configuration.
+
+---
+
+### 4. Clone the Repository
+
+```bash
+git clone https://github.com/Mayaro8/BioOps.git
+cd BioOps
+```
+
+---
+
+### 5. Configure Environment Variables
+
+Create a local `.env` file:
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env`:
+
+```bash
+nano .env
+```
+
+Recommended `.env` values:
+
+```bash
+GITHUB_TOKEN=your_github_token
+
+AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
+AZURE_OPENAI_API_KEY=your_azure_openai_key
+AZURE_OPENAI_API_VERSION=2024-02-01
+AZURE_OPENAI_CHAT_DEPLOYMENT=your_chat_deployment
+```
+
+The GitHub token should have read access to the repositories being reviewed.
+
+Do not commit `.env`.
+
+---
+
+### 6. Build Docker Image
+
+Build the BioOps image:
+
+```bash
+docker compose build bioops
+```
+
+If dependencies or imports fail, rebuild cleanly:
+
+```bash
+docker compose build --no-cache bioops
+```
+
+### 8. Start the BioOps CLI
+
+Run:
+
+```bash
+docker compose run --rm bioops python -m bioops.main
+```
+
+Expected startup:
+
+```text
+BioOps CLI started. Type 'exit' to quit.
+You:
+```
+
+---
+
+### 9. Review Agent Prompts
+
+Use the following prompts inside the CLI.
+
+#### Local Repository Review
+
+```text
+Review this repository.
+```
+
+```text
+Review path=/app
+```
+
+```text
+Check this repo for risks and missing tests.
+```
+
+```text
+Review local changes.
+```
+
+#### GitHub Repository Overview
+
+```text
+Review repo=Mayaro8/BioOps
+```
+
+```text
+Check repository repo=Mayaro8/BioOps
+```
+
+```text
+Review GitHub repository repo=Mayaro8/BioOps
+```
+
+#### Open Pull Requests
+
+```text
+Check open PRs repo=Mayaro8/BioOps
+```
+
+```text
+List open pull requests repo=Mayaro8/BioOps
+```
+
+```text
+Show open PRs repo=Mayaro8/BioOps
+```
+
+#### Specific Pull Request Review
+
+```text
+Review repo=Mayaro8/BioOps pr=1
+```
+
+```text
+Review https://github.com/Mayaro8/BioOps/pull/1
+```
+
+Replace `1` with the actual pull request number.
+
+#### Branch Comparison
+
+```text
+Review repo=Mayaro8/BioOps base=main head=feature/my-branch
+```
+
+```text
+Compare repo=Mayaro8/BioOps base=main head=feature/review-agent
+```
+
+Replace the branch names with real branches from the target repository.
+
+---
+
+### 10. Expected Output
+
+For a pull request or branch comparison, the Review Agent should return a report like:
+
+```text
+GitHub PR Review Report
+
+Status: ok
+Repository: owner/repo
+Subject: PR #1: title
+Base branch: main
+Head branch: feature/example
+
+Changed files: N
+Diff size: +A/-D
+
+Changed files summary:
+- src/example.py [modified, +10/-2]
+
+Found issues:
+- none
+
+Risks:
+- Agent code changed without corresponding test changes.
+
+Style / logic remarks:
+- Agent changes should preserve concise report formatting and safe side-effect behavior.
+
+Suggestions:
+- Run orchestrator routing tests for affected agents.
+
+LLM patch review:
+1. Verdict: ...
+2. Top issues: ...
+3. Risks: ...
+4. Next steps: ...
+
+Review note:
+- This is a read-only review using deterministic checks plus optional LLM patch analysis.
+- No GitHub comments were posted.
+- No PR status was modified.
+```
+
+The exact wording may differ depending on the current implementation and the reviewed repository.
+
+---
+
+### 11. Missing Configuration Behavior
+
+If `GITHUB_TOKEN` is missing, GitHub review requests should return a missing-configuration message instead of crashing.
+
+If Azure OpenAI variables are missing, the deterministic Review Agent checks should still work, but the LLM patch review section may say that LLM review is unavailable.
+
+This is acceptable for external testing as long as the tool fails safely and clearly.
+
+---
+
+### 12. Quick Start Command Sequence
+
+```bash
+git clone https://github.com/Mayaro8/BioOps.git
+cd BioOps
+
+cp .env.example .env
+# edit .env and add GITHUB_TOKEN and Azure OpenAI values if available
+
+docker compose build bioops
+docker compose run --rm bioops python -m pytest
+docker compose run --rm bioops python -m bioops.main
+```
+
+Then test inside the CLI:
+
+```text
+Review path=/app
+Review repo=Mayaro8/BioOps
+Check open PRs repo=Mayaro8/BioOps
+Review repo=Mayaro8/BioOps base=main head=feature/example
+```
+
+---
+
+### 13. Safety Notes
+
+The Review Agent is intended to be read-only.
+
+Expected behavior:
+
+```text
+It can read repository metadata.
+It can read pull request metadata.
+It can read changed files and patch text.
+It can produce review text.
+It should not post comments.
+It should not approve pull requests.
+It should not reject pull requests.
+It should not push commits.
+It should not modify repository files.
+```
+
+This makes it safe for external testing with read-only GitHub access.
+
