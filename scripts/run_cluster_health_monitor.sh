@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
-
-mkdir -p logs
+cd /home/mayar/bio-ops
 
 echo "=============================="
 echo "BioOps cluster health monitor"
