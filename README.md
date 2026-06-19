@@ -124,7 +124,7 @@ BioOps CLI started. Type 'exit' to quit.
 You:
 
 # Agent usage
-
+```
 ## 4. Knowledge Agent
 
 Purpose:
