@@ -481,72 +481,20 @@ Prompt:
 Are any pods failing?
 ```
 
-Expected answer shape:
-
-```text
-Cluster Health Report
-
-Unhealthy / waiting pods: 1
-
-Errors:
-- gvcf-to-vcf-worker is in phase Failed.
-- gvcf-to-vcf-worker terminated with exit code 1.
-```
-
-Prompt:
-
 ```text
 Which pipeline steps are running?
 ```
-
-Expected answer shape:
-
-```text
-Currently running pipeline steps:
-- bam-to-gvcf: bam-to-gvcf-worker [Running, runtime: ...]
-```
-
-Prompt:
 
 ```text
 Show recent Kubernetes errors.
 ```
 
-Expected answer shape:
-
-```text
-Errors:
-- gvcf-to-vcf-worker is in phase Failed.
-- gvcf-to-vcf-worker log error: failed gvcf-to-vcf
-- gvcf-to-vcf-worker terminated with exit code 1.
-```
-
-Prompt:
-
 ```text
 What is the ETA for the running pipeline?
 ```
 
-Expected answer shape:
-
-```text
-ETA:
-- bam-to-gvcf: estimated remaining time ...
-```
-
-Prompt:
-
 ```text
 How much is the current cluster run costing?
-```
-
-Expected answer shape:
-
-```text
-Cost:
-- Estimated cost: ...
-- Source: ...
-- Mode: ...
 ```
 
 Note:
