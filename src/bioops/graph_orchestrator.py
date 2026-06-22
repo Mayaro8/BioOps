@@ -10,6 +10,7 @@ from bioops.tools.llm_router import LLMRouterTool
 
 
 ROUTABLE_AGENTS = {"general", "knowledge", "cluster_health", "review"}
+ROUTING_ERROR = "routing_error"
 
 
 class BioOpsState(TypedDict):
@@ -18,11 +19,39 @@ class BioOpsState(TypedDict):
     response: str
 
 
-general_agent = GeneralAgent()
-knowledge_agent = KnowledgeAgent()
-review_agent = ReviewAgent()
-llm_router_tool = LLMRouterTool()
+general_agent: GeneralAgent | None = None
+knowledge_agent: KnowledgeAgent | None = None
+review_agent: ReviewAgent | None = None
 cluster_health_agent: ClusterHealthAgent | None = None
+
+llm_router_tool = LLMRouterTool()
+
+
+def get_general_agent() -> GeneralAgent:
+    global general_agent
+
+    if general_agent is None:
+        general_agent = GeneralAgent()
+
+    return general_agent
+
+
+def get_knowledge_agent() -> KnowledgeAgent:
+    global knowledge_agent
+
+    if knowledge_agent is None:
+        knowledge_agent = KnowledgeAgent()
+
+    return knowledge_agent
+
+
+def get_review_agent() -> ReviewAgent:
+    global review_agent
+
+    if review_agent is None:
+        review_agent = ReviewAgent()
+
+    return review_agent
 
 
 def get_cluster_health_agent() -> ClusterHealthAgent:
@@ -36,42 +65,52 @@ def get_cluster_health_agent() -> ClusterHealthAgent:
 
 def router_node(state: BioOpsState) -> dict:
     """
-    Route requests using the LLM router only.
+    Route requests using only the LLM router.
 
-    We intentionally do not use substring/keyword routing here because BioOps
-    prompts often contain overlapping intents such as "review logs", "explain
-    failed pods", or "check pipeline docs". The LLM router should decide from
-    full context.
-
-    If the LLM router is unavailable or returns an unsupported agent, we fall
-    back to the safe general agent.
+    No keyword fallback is used. If the LLM router is unavailable, invalid,
+    or misconfigured, return a clear routing error instead of guessing.
     """
     try:
-        selected_agent = llm_router_tool.route(state["message"]).agent
-    except Exception:
-        selected_agent = "general"
+        decision = llm_router_tool.route(state["message"])
+    except Exception as error:
+        return {
+            "selected_agent": ROUTING_ERROR,
+            "response": _format_routing_error(
+                f"{type(error).__name__}: {error}"
+            ),
+        }
+
+    selected_agent = decision.agent
 
     if selected_agent not in ROUTABLE_AGENTS:
-        selected_agent = "general"
+        return {
+            "selected_agent": ROUTING_ERROR,
+            "response": _format_routing_error(
+                f"LLM router returned unsupported agent: {selected_agent}"
+            ),
+        }
 
-    return {"selected_agent": selected_agent}
+    return {
+        "selected_agent": selected_agent,
+        "response": "",
+    }
 
 
 def route_after_router(state: BioOpsState) -> str:
-    selected_agent = state.get("selected_agent", "general")
+    selected_agent = state.get("selected_agent", ROUTING_ERROR)
 
-    if selected_agent not in ROUTABLE_AGENTS:
-        return "general"
+    if selected_agent in ROUTABLE_AGENTS:
+        return selected_agent
 
-    return selected_agent
+    return ROUTING_ERROR
 
 
 def general_node(state: BioOpsState) -> dict:
-    return {"response": general_agent.run(state["message"])}
+    return {"response": get_general_agent().run(state["message"])}
 
 
 def knowledge_node(state: BioOpsState) -> dict:
-    return {"response": knowledge_agent.run(state["message"])}
+    return {"response": get_knowledge_agent().run(state["message"])}
 
 
 def cluster_health_node(state: BioOpsState) -> dict:
@@ -79,7 +118,29 @@ def cluster_health_node(state: BioOpsState) -> dict:
 
 
 def review_node(state: BioOpsState) -> dict:
-    return {"response": review_agent.run(state["message"])}
+    return {"response": get_review_agent().run(state["message"])}
+
+
+def routing_error_node(state: BioOpsState) -> dict:
+    return {
+        "response": state.get("response")
+        or _format_routing_error("Unknown routing failure.")
+    }
+
+
+def _format_routing_error(error: str) -> str:
+    return "\n".join(
+        [
+            "BioOps routing failed",
+            "",
+            "Status: routing_error",
+            f"Error: {error}",
+            "",
+            "The orchestrator now uses LLM-only routing.",
+            "No keyword fallback was used.",
+            "No agent was started.",
+        ]
+    )
 
 
 graph_builder = StateGraph(BioOpsState)
@@ -89,6 +150,7 @@ graph_builder.add_node("general", general_node)
 graph_builder.add_node("knowledge", knowledge_node)
 graph_builder.add_node("cluster_health", cluster_health_node)
 graph_builder.add_node("review", review_node)
+graph_builder.add_node(ROUTING_ERROR, routing_error_node)
 
 graph_builder.set_entry_point("router")
 
@@ -100,6 +162,7 @@ graph_builder.add_conditional_edges(
         "knowledge": "knowledge",
         "cluster_health": "cluster_health",
         "review": "review",
+        ROUTING_ERROR: ROUTING_ERROR,
     },
 )
 
@@ -107,6 +170,7 @@ graph_builder.add_edge("general", END)
 graph_builder.add_edge("knowledge", END)
 graph_builder.add_edge("cluster_health", END)
 graph_builder.add_edge("review", END)
+graph_builder.add_edge(ROUTING_ERROR, END)
 
 graph = graph_builder.compile()
 
@@ -115,7 +179,7 @@ def run_graph(message: str) -> str:
     result = graph.invoke(
         {
             "message": message,
-            "selected_agent": "general",
+            "selected_agent": ROUTING_ERROR,
             "response": "",
         }
     )

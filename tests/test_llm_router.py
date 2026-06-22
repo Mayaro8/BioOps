@@ -1,56 +1,49 @@
 import pytest
 
-from bioops.tools.llm_router import LLMRouterTool
+from bioops.tools.llm_router import ALLOWED_AGENTS, LLMRouterTool
 
 
 def test_parse_valid_router_json():
     tool = LLMRouterTool()
 
-    decision = tool._parse_decision(
-        '{"agent": "cluster_health", "confidence": 0.88, "reason": "pod status question"}'
+    decision = tool._parse_response(
+        '{"agent": "cluster_health", "reason": "pod status question"}'
     )
 
     assert decision.agent == "cluster_health"
-    assert decision.confidence == 0.88
     assert decision.reason == "pod status question"
 
 
-def test_parse_router_json_inside_markdown_block():
+def test_parse_router_json_code_fence():
     tool = LLMRouterTool()
 
-    decision = tool._parse_decision(
-        '''```json
-{"agent": "review", "confidence": 0.91, "reason": "PR review request"}
-```'''
+    decision = tool._parse_response(
+        '```json\n{"agent": "review", "reason": "code review"}\n```'
     )
 
     assert decision.agent == "review"
-    assert decision.confidence == 0.91
 
 
-def test_rejects_unknown_agent():
+def test_parse_rejects_removed_echo_agent():
     tool = LLMRouterTool()
 
     with pytest.raises(ValueError):
-        tool._parse_decision(
-            '{"agent": "fake_agent", "confidence": 0.7, "reason": "bad"}'
-        )
+        tool._parse_response('{"agent": "echo", "reason": "removed"}')
 
 
-def test_rejects_removed_echo_agent():
+def test_route_raises_when_azure_is_not_configured():
     tool = LLMRouterTool()
+    tool.enabled = False
+    tool.client = None
 
-    with pytest.raises(ValueError):
-        tool._parse_decision(
-            '{"agent": "echo", "confidence": 0.7, "reason": "old fallback"}'
-        )
+    with pytest.raises(RuntimeError):
+        tool.route("hello")
 
 
-def test_clamps_confidence_to_one():
-    tool = LLMRouterTool()
-
-    decision = tool._parse_decision(
-        '{"agent": "knowledge", "confidence": 2.5, "reason": "docs question"}'
-    )
-
-    assert decision.confidence == 1.0
+def test_allowed_agents_are_only_current_agents():
+    assert ALLOWED_AGENTS == {
+        "general",
+        "knowledge",
+        "cluster_health",
+        "review",
+    }

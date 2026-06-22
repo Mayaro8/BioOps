@@ -1,27 +1,22 @@
 import json
 import os
 from dataclasses import dataclass
+from typing import Any
 
 from openai import AzureOpenAI
 
 
-ALLOWED_AGENTS = {
-    "general",
-    "knowledge",
-    "cluster_health",
-    "review",
-}
+ALLOWED_AGENTS = {"general", "knowledge", "cluster_health", "review"}
 
 
 @dataclass
 class RouterDecision:
     agent: str
-    confidence: float
     reason: str
 
 
 class LLMRouterTool:
-    """Routes a user message to one BioOps agent using Azure OpenAI."""
+    """LLM-only router for BioOps agent selection."""
 
     def __init__(self):
         self.endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
@@ -48,12 +43,15 @@ class LLMRouterTool:
                 azure_endpoint=self.endpoint,
                 api_key=self.api_key,
                 api_version=self.api_version,
-                timeout=10.0,
+                timeout=30.0,
             )
 
     def route(self, message: str) -> RouterDecision:
         if not self.enabled or self.client is None:
-            raise RuntimeError("LLM router unavailable: Azure OpenAI is not configured.")
+            raise RuntimeError(
+                "LLM router unavailable: Azure OpenAI environment variables "
+                "are not fully configured."
+            )
 
         prompt = self._build_prompt(message)
 
@@ -64,9 +62,8 @@ class LLMRouterTool:
                     {
                         "role": "system",
                         "content": (
-                            "You are the routing layer for BioOps, a multi-agent "
-                            "bioinformatics operations assistant. Choose exactly one "
-                            "agent. Return only valid JSON."
+                            "You route BioOps user requests to exactly one agent. "
+                            "Return strict JSON only."
                         ),
                     },
                     {
@@ -83,9 +80,8 @@ class LLMRouterTool:
                     {
                         "role": "system",
                         "content": (
-                            "You are the routing layer for BioOps, a multi-agent "
-                            "bioinformatics operations assistant. Choose exactly one "
-                            "agent. Return only valid JSON."
+                            "You route BioOps user requests to exactly one agent. "
+                            "Return strict JSON only."
                         ),
                     },
                     {
@@ -95,72 +91,70 @@ class LLMRouterTool:
                 ],
                 max_tokens=250,
             )
+        except Exception as error:
+            raise RuntimeError(
+                f"LLM router request failed: {type(error).__name__}: {error}"
+            ) from error
 
         content = response.choices[0].message.content or ""
-        return self._parse_decision(content)
+        return self._parse_response(content)
 
     def _build_prompt(self, message: str) -> str:
-        return "\n".join(
-            [
-                "Choose exactly one BioOps agent for this user message.",
-                "",
-                "Available agents:",
-                "",
-                "- knowledge: answers questions about project docs, pipeline metadata, source code, pipeline steps, inputs, outputs, and explanations.",
-                "- cluster_health: checks Kubernetes cluster health, pods, logs, pod failures, pod status, running steps, and unhealthy containers.",
-                "- review: reviews repositories, pull requests, merge requests, branch diffs, code changes, risks, style, logic issues, and missing tests.",
-                "- general: fallback for greetings, unclear requests, unsupported requests, and normal conversation.",
-                "",
-                "Return only JSON in this exact shape:",
-                "{",
-                '  "agent": "one of: general, knowledge, cluster_health, review",',
-                '  "confidence": 0.0,',
-                '  "reason": "short reason"',
-                "}",
-                "",
-                "Rules:",
-                "- Do not invent new agent names.",
-                "- Prefer the most operational/specific agent.",
-                "- Route documentation, pipeline explanation, file/step meaning, and source-code explanation questions to knowledge.",
-                "- Route Kubernetes, pods, pod logs, pod health, failed containers, and cluster status questions to cluster_health.",
-                "- Route repository review, PR/MR review, branch diff review, code risk, style, logic, and missing-test questions to review.",
-                "- Use general only when no specialist BioOps agent clearly fits.",
-                "",
-                "User message:",
-                message,
-            ]
-        )
+        return f"""
+Choose exactly one BioOps agent for this user request.
 
-    def _parse_decision(self, content: str) -> RouterDecision:
-        data = self._extract_json(content)
+Allowed agents:
+- general: general conversation, greetings, broad questions, or anything that does not require a specialist BioOps tool.
+- knowledge: questions about BioOps documentation, pipeline steps, workflow metadata, command examples, or stored project knowledge.
+- cluster_health: Kubernetes cluster state, pods, pod logs, failed/running jobs, health monitor, Bitrix health alerts, or pipeline runtime status.
+- review: code review, repository review, GitHub pull requests, branch comparison, diffs, suspicious files, or implementation risks.
 
-        agent = str(data.get("agent", "")).strip()
-        confidence = float(data.get("confidence", 0.0))
-        reason = str(data.get("reason", "")).strip()
+Rules:
+- Use full context, not single keywords.
+- Do not choose review only because the word "review" appears if the user is asking about health logs or documentation.
+- Do not choose knowledge only because the word "explain" appears; decide whether the explanation needs docs, cluster status, review, or general response.
+- Return JSON only.
+
+JSON shape:
+{{
+  "agent": "general|knowledge|cluster_health|review",
+  "reason": "short reason"
+}}
+
+User request:
+{message}
+""".strip()
+
+    def _parse_response(self, content: str) -> RouterDecision:
+        data = self._parse_json(content)
+
+        if not isinstance(data, dict):
+            raise ValueError("LLM router returned non-JSON or invalid JSON content.")
+
+        agent = data.get("agent")
+        reason = data.get("reason", "")
+
+        if not isinstance(agent, str):
+            raise ValueError("LLM router response is missing string field 'agent'.")
+
+        agent = agent.strip().lower()
 
         if agent not in ALLOWED_AGENTS:
             raise ValueError(f"LLM router returned unsupported agent: {agent}")
 
-        confidence = max(0.0, min(1.0, confidence))
+        if not isinstance(reason, str) or not reason.strip():
+            reason = "No reason provided."
 
-        return RouterDecision(
-            agent=agent,
-            confidence=confidence,
-            reason=reason,
-        )
+        return RouterDecision(agent=agent, reason=reason.strip())
 
-    def _extract_json(self, content: str) -> dict:
-        text = content.strip()
+    def _parse_json(self, content: str) -> Any:
+        cleaned = content.strip()
 
-        if text.startswith("```"):
-            text = text.strip("`").strip()
-            if text.startswith("json"):
-                text = text[4:].strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.removeprefix("```json").removeprefix("```").strip()
+            cleaned = cleaned.removesuffix("```").strip()
 
-        start = text.find("{")
-        end = text.rfind("}")
-
-        if start == -1 or end == -1 or end <= start:
-            raise ValueError(f"LLM router returned non-JSON content: {content}")
-
-        return json.loads(text[start : end + 1])
+        try:
+            return json.loads(cleaned)
+        except json.JSONDecodeError:
+            return None
