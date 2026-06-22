@@ -1,9 +1,16 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field
+from typing import Any
 
 from bioops.tools.argo_tool import (
     ArgoSubmitPreview,
     ArgoSubmitResult,
     ArgoTool,
+)
+from bioops.tools.submit_master_config_builder import (
+    SubmitMasterConfigBuilder,
+    SubmitMasterConfigInput,
 )
 
 
@@ -13,11 +20,22 @@ class SubmitRequest:
     batch_id: str | None = None
     pipeline: str | None = None
     step: str | None = None
+    steps_order: str | None = None
+    stage: str | None = None
+    seq_type: str | None = None
+    cluster_name: str | None = None
+    mongo_cluster_name: str | None = None
     input_uri: str | None = None
     output_uri: str | None = None
     workflow_file: str | None = None
     namespace: str | None = None
+    wait: bool = True
+    only_good: bool = True
+    delay: int = 0
+    delay_step: int = 1
+    chunk_size: int = 1
     confirm: bool = False
+    extra_params: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -33,17 +51,21 @@ class SubmitPlan:
 
 
 class SubmitMasterTool:
-    """
-    Builds and optionally submits Argo workflow plans.
+    """Builds submit-master configs and keeps launch gated behind confirm=true."""
 
-    Submission happens only when request.confirm is True.
-    """
-
-    def __init__(self, argo_tool: ArgoTool | None = None):
+    def __init__(
+        self,
+        argo_tool: ArgoTool | None = None,
+        config_builder: SubmitMasterConfigBuilder | None = None,
+    ):
         self.argo_tool = argo_tool or ArgoTool()
+        self.config_builder = config_builder or SubmitMasterConfigBuilder()
 
     def build_plan(self, request: SubmitRequest) -> SubmitPlan:
-        missing_fields = self._validate_request(request)
+        config_input = self._build_config_input(request)
+        config_result = self.config_builder.build(config_input)
+
+        missing_fields = list(config_result.errors)
         parameters = self._build_argo_parameters(request)
 
         argo_preview = self.argo_tool.prepare_submit_command(
@@ -53,109 +75,66 @@ class SubmitMasterTool:
         )
 
         notes = [
-            "SubmitMasterAgent is Argo-aware.",
-            "Dry-run preview is always generated before submission.",
-            "Real submission requires confirm=true.",
+            "D1 implemented: generated original-compatible submit-master JSON config.",
+            "This step is still dry-run oriented.",
+            "Real submit-master launch will be implemented separately and must require confirm=true.",
+            "Do not copy original submit-master secrets or service-account files into BioOps.",
         ]
+        notes.extend(config_result.warnings)
 
         submit_result = ArgoSubmitResult(
             submitted=False,
             workflow_name=None,
             namespace=argo_preview.namespace,
             phase="NotSubmitted",
-            message="Dry run only. Add confirm=true to submit.",
+            message="Dry run only. D2 submit-master launch is not implemented in this slice.",
             error=None,
         )
 
-        if request.confirm:
-            if missing_fields:
-                submit_result = ArgoSubmitResult(
-                    submitted=False,
-                    workflow_name=None,
-                    namespace=argo_preview.namespace,
-                    phase="NotSubmitted",
-                    message="Submission blocked because required fields are missing.",
-                    error=", ".join(missing_fields),
-                )
-            elif argo_preview.missing_config:
-                submit_result = ArgoSubmitResult(
-                    submitted=False,
-                    workflow_name=None,
-                    namespace=argo_preview.namespace,
-                    phase="NotSubmitted",
-                    message="Submission blocked because Argo config is incomplete.",
-                    error=", ".join(argo_preview.missing_config),
-                )
-            else:
-                submit_result = self.argo_tool.submit_workflow(
-                    workflow_file=argo_preview.workflow_file,
-                    namespace=argo_preview.namespace,
-                    parameters=parameters,
-                )
-
-        status = "submitted" if submit_result.submitted else "dry-run only"
+        status = "dry-run only"
 
         return SubmitPlan(
             status=status,
             missing_fields=missing_fields,
-            config_preview=self._build_config_preview(request, parameters),
+            config_preview=config_result.json_text,
             argo_preview=argo_preview,
             submit_result=submit_result,
-            job_launched=submit_result.submitted,
+            job_launched=False,
             parameters=parameters,
             notes=notes,
         )
 
-    def _validate_request(self, request: SubmitRequest) -> list[str]:
-        missing: list[str] = []
+    def _build_config_input(self, request: SubmitRequest) -> SubmitMasterConfigInput:
+        return SubmitMasterConfigInput(
+            stage=request.stage or "",
+            steps_order=request.steps_order or request.step or "",
+            seq_type=request.seq_type or "illumina",
+            cluster_name=request.cluster_name or "",
+            mongo_cluster_name=request.mongo_cluster_name or "",
+            namespace=request.namespace or "default",
+            sample_ids=self._parse_sample_ids(request.sample_id),
+            batch_id=request.batch_id,
+            run_id=request.extra_params.get("run_id"),
+            delay=request.delay,
+            delay_step=request.delay_step,
+            chunk_size=request.chunk_size,
+            wait=request.wait,
+            only_good=request.only_good,
+            extra_params=request.extra_params,
+        )
 
-        if not request.sample_id and not request.batch_id:
-            missing.append("sample_id or batch_id")
+    def _parse_sample_ids(self, value: str | None) -> list[str]:
+        if not value:
+            return []
 
-        if not request.pipeline:
-            missing.append("pipeline")
-
-        if not request.step:
-            missing.append("step")
-
-        if not request.input_uri:
-            missing.append("input_uri")
-
-        if not request.output_uri:
-            missing.append("output_uri")
-
-        return missing
+        return [item.strip() for item in value.split(",") if item.strip()]
 
     def _build_argo_parameters(self, request: SubmitRequest) -> dict[str, str]:
         return {
             "SAMPLE_IDS": request.sample_id or "",
             "BATCH_ID": request.batch_id or "",
-            "PIPELINE": request.pipeline or "",
-            "STEP": request.step or "",
+            "PIPELINE": request.pipeline or "pipeline-v3.0",
+            "STEP": request.step or request.steps_order or "",
             "INPUT_URI": request.input_uri or "",
             "OUTPUT_URI": request.output_uri or "",
         }
-
-    def _build_config_preview(
-        self,
-        request: SubmitRequest,
-        parameters: dict[str, str],
-    ) -> str:
-        lines = [
-            "submission:",
-            f"  sample_id: {request.sample_id or 'null'}",
-            f"  batch_id: {request.batch_id or 'null'}",
-            f"  pipeline: {request.pipeline or 'null'}",
-            f"  step: {request.step or 'null'}",
-            f"  input_uri: {request.input_uri or 'null'}",
-            f"  output_uri: {request.output_uri or 'null'}",
-            f"  argo_namespace: {request.namespace or 'default-from-tool'}",
-            f"  workflow_file: {request.workflow_file or 'default-from-tool'}",
-            f"  confirm: {str(request.confirm).lower()}",
-            "  argo_parameters:",
-        ]
-
-        for key, value in parameters.items():
-            lines.append(f"    {key}: {value or 'null'}")
-
-        return "\n".join(lines)
