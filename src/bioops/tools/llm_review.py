@@ -2,8 +2,6 @@ import os
 
 from openai import AzureOpenAI
 
-from bioops.tools.git_review import RepoReview
-
 
 class LLMReviewTool:
     """Uses Azure OpenAI to perform concise architecture and code review."""
@@ -36,10 +34,6 @@ class LLMReviewTool:
                 timeout=30.0,
             )
 
-    def review(self, repo_path: str, review: RepoReview) -> str:
-        prompt = self._build_prompt(repo_path, review)
-        return self.review_prompt(prompt)
-
     def review_prompt(self, prompt: str) -> str:
         if not self.enabled or self.client is None:
             return (
@@ -47,82 +41,36 @@ class LLMReviewTool:
                 "are not fully configured."
             )
 
+        system_prompt = (
+            "You are a senior bioinformatics platform engineer reviewing GitHub "
+            "pull request patches for a multi-agent BioOps assistant.\n"
+            "Be concise, strict, and practical.\n"
+            "Focus on logic bugs, unsafe behavior, missing tests, deployment risks, "
+            "and integration issues."
+        )
+
         try:
             response = self.client.chat.completions.create(
                 model=self.deployment,
                 messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are a senior bioinformatics platform engineer "
-                            "reviewing GitHub pull request patches for a multi-agent "
-                            "BioOps assistant. Be concise, strict, and practical. "
-                            "Focus on logic bugs, unsafe behavior, missing tests, "
-                            "deployment risks, and integration issues."
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt,
-                    },
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt},
                 ],
                 max_completion_tokens=5000,
             )
+        except TypeError:
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.deployment,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": prompt},
+                    ],
+                    max_tokens=5000,
+                )
+            except Exception as error:
+                return f"LLM review failed: {type(error).__name__}: {error}"
         except Exception as error:
             return f"LLM review failed: {type(error).__name__}: {error}"
 
         return response.choices[0].message.content or "LLM review returned no content."
-
-    def _build_prompt(self, repo_path: str, review: RepoReview) -> str:
-        changed_files = "\n".join(
-            f"- {file_path}" for file_path in review.changed_files
-        )
-        if not changed_files:
-            changed_files = "- No changed files detected."
-
-        deterministic_findings = "\n".join(
-            (
-                f"- [{issue.severity}] {issue.file}: {issue.message} "
-                f"Suggestion: {issue.suggestion}"
-            )
-            for issue in review.issues
-        )
-        if not deterministic_findings:
-            deterministic_findings = "- No deterministic issues found."
-
-        diff_text = review.diff_text.strip()
-        if not diff_text:
-            diff_text = (
-                "[No git diff available. Review based on changed files and "
-                "deterministic findings.]"
-            )
-
-        prompt_lines = [
-            "Review this BioOps repository change.",
-            "",
-            "Repository/path:",
-            repo_path,
-            "",
-            "Changed files:",
-            changed_files,
-            "",
-            "Deterministic findings:",
-            deterministic_findings,
-            "",
-            "Git diff:",
-            "```diff",
-            diff_text,
-            "```",
-            "",
-            "Return a concise review with exactly these sections:",
-            "",
-            "1. Verdict: one sentence.",
-            "2. Top issues: maximum 3 bullets.",
-            "3. Risks: maximum 2 bullets.",
-            "4. Next steps: maximum 3 bullets.",
-            "",
-            "Keep the full review under 250 words.",
-            "Do not invent files or behavior not shown in the diff or findings.",
-        ]
-
-        return "\n".join(prompt_lines)
