@@ -16,13 +16,10 @@ from bioops.tools.submit_master_tool import (
 
 
 class SubmitMasterAgent(BaseAgent):
-    """Prepares original-compatible submit-master configs.
-
-    Real submit-master launch is a later D2 step and must require confirmation.
-    """
+    """Prepares original-compatible submit-master configs and safe D2 launch plans."""
 
     name = "submit_master"
-    description = "Prepares submit-master configs for launching pipeline jobs."
+    description = "Prepares and safely launches submit-master configs for pipeline jobs."
 
     def __init__(
         self,
@@ -37,7 +34,18 @@ class SubmitMasterAgent(BaseAgent):
             workflow_file=self.submit_config.get("workflow_file"),
         )
 
-        self.submit_tool = submit_tool or SubmitMasterTool(argo_tool=argo_tool)
+        self.submit_tool = submit_tool or SubmitMasterTool(
+            argo_tool=argo_tool,
+            submit_master_entrypoint=self.submit_config.get("submit_master_entrypoint", ""),
+            generated_config_dir=self.submit_config.get(
+                "generated_config_dir",
+                "logs/submit_master_configs",
+            ),
+            contour=self.submit_config.get("contour", "prod"),
+            python_executable=self.submit_config.get("python_executable", "python"),
+            launch_timeout_seconds=int(self.submit_config.get("launch_timeout_seconds", 900)),
+            allow_launch=bool(self.submit_config.get("allow_launch", False)),
+        )
 
     def run(self, message: str) -> str:
         request = self._parse_message(message)
@@ -64,6 +72,7 @@ class SubmitMasterAgent(BaseAgent):
             "seq_type", "sequencer",
             "cluster", "cluster_name", "k8s_cluster_name",
             "mongo_cluster", "mongo_cluster_name",
+            "contour",
             "namespace", "argo_namespace",
             "input_uri", "input",
             "output_uri", "output",
@@ -104,6 +113,7 @@ class SubmitMasterAgent(BaseAgent):
                 or values.get("k8s_cluster_name")
             ),
             mongo_cluster_name=values.get("mongo_cluster_name") or values.get("mongo_cluster"),
+            contour=values.get("contour"),
             input_uri=values.get("input_uri") or values.get("input"),
             output_uri=values.get("output_uri") or values.get("output"),
             workflow_file=(
@@ -150,6 +160,8 @@ class SubmitMasterAgent(BaseAgent):
             return default
 
     def _format_report(self, request: SubmitRequest, plan: SubmitPlan) -> str:
+        launch = plan.launch_result
+
         lines = [
             "Submit Master Report",
             "",
@@ -164,6 +176,7 @@ class SubmitMasterAgent(BaseAgent):
             f"- seq_type: {request.seq_type or 'not provided'}",
             f"- cluster_name: {request.cluster_name or 'not provided'}",
             f"- mongo_cluster_name: {request.mongo_cluster_name or 'not provided'}",
+            f"- contour: {request.contour or 'config default'}",
             f"- namespace: {request.namespace or 'default'}",
             f"- sample_id/sample_ids: {request.sample_id or 'not provided'}",
             f"- batch_id: {request.batch_id or 'not provided'}",
@@ -186,7 +199,36 @@ class SubmitMasterAgent(BaseAgent):
                 "Generated submit-master JSON config:",
                 plan.config_preview,
                 "",
-                "Argo preview kept for later D2 compatibility:",
+                "D2 launch result:",
+            ]
+        )
+
+        if launch is None:
+            lines.append("- No launch result available.")
+        else:
+            lines.extend(
+                [
+                    f"- Launched: {launch.launched}",
+                    f"- Saved config: {launch.saved_config_path or 'not saved'}",
+                    f"- Command: {' '.join(launch.command) if launch.command else 'not configured'}",
+                    f"- Return code: {launch.returncode if launch.returncode is not None else 'not run'}",
+                    f"- Message: {launch.message}",
+                ]
+            )
+
+            if launch.blocked_reason:
+                lines.append(f"- Blocked reason: {launch.blocked_reason}")
+
+            if launch.stdout:
+                lines.extend(["", "Submit-master stdout:", launch.stdout.strip()])
+
+            if launch.stderr:
+                lines.extend(["", "Submit-master stderr:", launch.stderr.strip()])
+
+        lines.extend(
+            [
+                "",
+                "Argo preview kept for compatibility:",
                 f"- Namespace: {plan.argo_preview.namespace}",
                 f"- Workflow file: {plan.argo_preview.workflow_file or 'not configured'}",
                 f"- Command: {plan.argo_preview.command}",
@@ -205,13 +247,5 @@ class SubmitMasterAgent(BaseAgent):
 
         lines.extend(["", "Notes:"])
         lines.extend(f"- {item}" for item in plan.notes)
-
-        lines.extend(
-            [
-                "",
-                "No submit master was launched in this D1 slice.",
-                "D2 launch will be added separately and must require confirm=true.",
-            ]
-        )
 
         return "\n".join(lines)
