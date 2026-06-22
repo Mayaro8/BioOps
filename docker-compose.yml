@@ -23,7 +23,6 @@ services:
     volumes:
       - .:/app
       - ~/.kube:/root/.kube:ro
-      - ~/.minikube:/home/mayar/.minikube:ro
       - ~/.minikube:/root/.minikube:ro
     depends_on:
       - qdrant

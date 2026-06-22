@@ -656,7 +656,7 @@ crontab -e
 Add:
 
 ```cron
-0 */3 * * * cd /home/mayar/bio-ops && bash scripts/run_cluster_health_monitor.sh >> logs/cluster_health_monitor.log 2>&1
+0 */3 * * * cd /path/to/bio-ops && bash scripts/run_cluster_health_monitor.sh >> logs/cluster_health_monitor.log 2>&1
 ```
 
 This runs the health monitor every 3 hours and writes output to:

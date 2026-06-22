@@ -283,7 +283,7 @@ class GitReviewTool:
         issues: list[ReviewIssue] = []
 
         suspicious_files = [
-            "requirements.txtض",
+            "requirements.txt",
             "kubectl",
             "minikube-linux-amd64",
         ]
