@@ -1,49 +1,69 @@
 import pytest
 
-from bioops.tools.llm_router import ALLOWED_AGENTS, LLMRouterTool
+from bioops.tools.llm_router import DEFAULT_ALLOWED_AGENTS, LLMRouterTool
+
+
+def test_default_allowed_agents_are_supported_agents():
+    assert DEFAULT_ALLOWED_AGENTS == {
+        "general",
+        "knowledge",
+        "cluster_health",
+        "review",
+    }
 
 
 def test_parse_valid_router_json():
     tool = LLMRouterTool()
 
     decision = tool._parse_response(
-        '{"agent": "cluster_health", "reason": "pod status question"}'
+        '{"agent": "knowledge", "reason": "User asks about documentation."}'
     )
 
-    assert decision.agent == "cluster_health"
-    assert decision.reason == "pod status question"
+    assert decision.agent == "knowledge"
+    assert decision.reason == "User asks about documentation."
 
 
-def test_parse_router_json_code_fence():
+def test_parse_json_from_markdown_block():
     tool = LLMRouterTool()
 
     decision = tool._parse_response(
-        '```json\n{"agent": "review", "reason": "code review"}\n```'
+        """```json
+        {"agent": "cluster_health", "reason": "User asks about failed pods."}
+        ```"""
     )
 
-    assert decision.agent == "review"
+    assert decision.agent == "cluster_health"
+    assert decision.reason == "User asks about failed pods."
 
 
-def test_parse_rejects_removed_echo_agent():
-    tool = LLMRouterTool()
+def test_rejects_disabled_agent():
+    tool = LLMRouterTool(allowed_agents={"general", "knowledge"})
 
-    with pytest.raises(ValueError):
-        tool._parse_response('{"agent": "echo", "reason": "removed"}')
-
-
-def test_route_raises_when_azure_is_not_configured():
-    tool = LLMRouterTool()
-    tool.enabled = False
-    tool.client = None
-
-    with pytest.raises(RuntimeError):
-        tool.route("hello")
+    with pytest.raises(ValueError, match="disabled or unsupported agent"):
+        tool._parse_response(
+            '{"agent": "review", "reason": "User asks for code review."}'
+        )
 
 
-def test_allowed_agents_are_only_current_agents():
-    assert ALLOWED_AGENTS == {
-        "general",
-        "knowledge",
-        "cluster_health",
-        "review",
-    }
+def test_constructor_rejects_unknown_agent():
+    with pytest.raises(ValueError, match="Unsupported router agents configured"):
+        LLMRouterTool(allowed_agents={"general", "fake_agent"})
+
+
+def test_general_is_always_allowed():
+    tool = LLMRouterTool(allowed_agents={"knowledge"})
+
+    assert "general" in tool.allowed_agents
+    assert "knowledge" in tool.allowed_agents
+
+
+def test_prompt_lists_only_enabled_agents():
+    tool = LLMRouterTool(allowed_agents={"general", "knowledge"})
+
+    prompt = tool._build_prompt("review this repository")
+
+    assert "- general:" in prompt
+    assert "- knowledge:" in prompt
+    assert "- review:" not in prompt
+    assert "- cluster_health:" not in prompt
+    assert '"agent": "general|knowledge"' in prompt

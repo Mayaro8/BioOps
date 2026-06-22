@@ -6,7 +6,10 @@ from typing import Any
 from openai import AzureOpenAI
 
 
-ALLOWED_AGENTS = {"general", "knowledge", "cluster_health", "review"}
+DEFAULT_ALLOWED_AGENTS = {"general", "knowledge", "cluster_health", "review"}
+
+# Backward-compatible alias for older imports/tests.
+ALLOWED_AGENTS = DEFAULT_ALLOWED_AGENTS
 
 
 @dataclass
@@ -18,7 +21,18 @@ class RouterDecision:
 class LLMRouterTool:
     """LLM-only router for BioOps agent selection."""
 
-    def __init__(self):
+    def __init__(self, allowed_agents: set[str] | list[str] | tuple[str, ...] | None = None):
+        self.allowed_agents = set(allowed_agents or DEFAULT_ALLOWED_AGENTS)
+
+        # General must always exist as the safe fallback category.
+        self.allowed_agents.add("general")
+
+        unsupported_agents = self.allowed_agents - DEFAULT_ALLOWED_AGENTS
+        if unsupported_agents:
+            raise ValueError(
+                f"Unsupported router agents configured: {sorted(unsupported_agents)}"
+            )
+
         self.endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
         self.api_key = os.getenv("AZURE_OPENAI_API_KEY")
         self.api_version = os.getenv("AZURE_OPENAI_API_VERSION")
@@ -62,7 +76,7 @@ class LLMRouterTool:
                     {
                         "role": "system",
                         "content": (
-                            "You route BioOps user requests to exactly one agent. "
+                            "You route BioOps user requests to exactly one enabled agent. "
                             "Return strict JSON only."
                         ),
                     },
@@ -80,7 +94,7 @@ class LLMRouterTool:
                     {
                         "role": "system",
                         "content": (
-                            "You route BioOps user requests to exactly one agent. "
+                            "You route BioOps user requests to exactly one enabled agent. "
                             "Return strict JSON only."
                         ),
                     },
@@ -100,24 +114,49 @@ class LLMRouterTool:
         return self._parse_response(content)
 
     def _build_prompt(self, message: str) -> str:
-        return f"""
-Choose exactly one BioOps agent for this user request.
+        agent_descriptions = {
+            "general": (
+                "general conversation, greetings, broad questions, unclear requests, "
+                "or anything that does not require a specialist BioOps tool"
+            ),
+            "knowledge": (
+                "questions about BioOps documentation, pipeline steps, workflow metadata, "
+                "command examples, source code explanations, or stored project knowledge"
+            ),
+            "cluster_health": (
+                "Kubernetes cluster state, pods, pod logs, failed/running jobs, health monitor, "
+                "Bitrix health alerts, cost, ETA, or pipeline runtime status"
+            ),
+            "review": (
+                "code review, repository review, GitHub pull requests, branch comparison, "
+                "diffs, suspicious files, implementation risks, or missing tests"
+            ),
+        }
 
-Allowed agents:
-- general: general conversation, greetings, broad questions, or anything that does not require a specialist BioOps tool.
-- knowledge: questions about BioOps documentation, pipeline steps, workflow metadata, command examples, or stored project knowledge.
-- cluster_health: Kubernetes cluster state, pods, pod logs, failed/running jobs, health monitor, Bitrix health alerts, or pipeline runtime status.
-- review: code review, repository review, GitHub pull requests, branch comparison, diffs, suspicious files, or implementation risks.
+        allowed_lines = "\n".join(
+            f"- {agent}: {agent_descriptions[agent]}"
+            for agent in sorted(self.allowed_agents)
+        )
+
+        allowed_agent_values = "|".join(sorted(self.allowed_agents))
+
+        return f"""
+Choose exactly one enabled BioOps agent for this user request.
+
+Enabled agents:
+{allowed_lines}
 
 Rules:
 - Use full context, not single keywords.
+- Choose only one of the enabled agents listed above.
+- Do not choose an agent that is not listed above.
 - Do not choose review only because the word "review" appears if the user is asking about health logs or documentation.
-- Do not choose knowledge only because the word "explain" appears; decide whether the explanation needs docs, cluster status, review, or general response.
+- Do not choose knowledge only because the word "explain" appears; decide whether the explanation needs docs, cluster status, code review, or general response.
 - Return JSON only.
 
 JSON shape:
 {{
-  "agent": "general|knowledge|cluster_health|review",
+  "agent": "{allowed_agent_values}",
   "reason": "short reason"
 }}
 
@@ -139,8 +178,10 @@ User request:
 
         agent = agent.strip().lower()
 
-        if agent not in ALLOWED_AGENTS:
-            raise ValueError(f"LLM router returned unsupported agent: {agent}")
+        if agent not in self.allowed_agents:
+            raise ValueError(
+                f"LLM router returned disabled or unsupported agent: {agent}"
+            )
 
         if not isinstance(reason, str) or not reason.strip():
             reason = "No reason provided."

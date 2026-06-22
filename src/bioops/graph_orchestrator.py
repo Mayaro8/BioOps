@@ -1,5 +1,7 @@
-from typing import TypedDict
+from pathlib import Path
+from typing import Any, TypedDict
 
+import yaml
 from langgraph.graph import END, StateGraph
 
 from bioops.agents.cluster_health_agent import ClusterHealthAgent
@@ -9,7 +11,11 @@ from bioops.agents.review_agent import ReviewAgent
 from bioops.tools.llm_router import LLMRouterTool
 
 
-ROUTABLE_AGENTS = {"general", "knowledge", "cluster_health", "review"}
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+AGENTS_CONFIG_PATH = PROJECT_ROOT / "configs" / "agents.yaml"
+
+SUPPORTED_AGENTS = {"general", "knowledge", "cluster_health", "review"}
+MANDATORY_AGENTS = {"general"}
 ROUTING_ERROR = "routing_error"
 
 
@@ -24,7 +30,50 @@ knowledge_agent: KnowledgeAgent | None = None
 review_agent: ReviewAgent | None = None
 cluster_health_agent: ClusterHealthAgent | None = None
 
-llm_router_tool = LLMRouterTool()
+
+def load_agents_config(path: Path = AGENTS_CONFIG_PATH) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+
+    with path.open("r", encoding="utf-8") as handle:
+        data = yaml.safe_load(handle) or {}
+
+    if not isinstance(data, dict):
+        return {}
+
+    return data
+
+
+def get_agents_section(config: dict[str, Any] | None = None) -> dict[str, Any]:
+    config = config if config is not None else load_agents_config()
+
+    agents_section = config.get("agents", config)
+
+    if not isinstance(agents_section, dict):
+        return {}
+
+    return agents_section
+
+
+def get_enabled_agent_names(config: dict[str, Any] | None = None) -> set[str]:
+    agents_section = get_agents_section(config)
+
+    enabled_agents = set(MANDATORY_AGENTS)
+
+    for agent_name in SUPPORTED_AGENTS:
+        agent_config = agents_section.get(agent_name, {})
+
+        if not isinstance(agent_config, dict):
+            continue
+
+        if agent_config.get("enabled", False):
+            enabled_agents.add(agent_name)
+
+    return enabled_agents
+
+
+ENABLED_AGENT_NAMES = get_enabled_agent_names()
+llm_router_tool = LLMRouterTool(allowed_agents=ENABLED_AGENT_NAMES)
 
 
 def get_general_agent() -> GeneralAgent:
@@ -67,6 +116,7 @@ def router_node(state: BioOpsState) -> dict:
     """
     Route requests using only the LLM router.
 
+    Enabled agents are loaded from configs/agents.yaml.
     No keyword fallback is used. If the LLM router is unavailable, invalid,
     or misconfigured, return a clear routing error instead of guessing.
     """
@@ -82,11 +132,11 @@ def router_node(state: BioOpsState) -> dict:
 
     selected_agent = decision.agent
 
-    if selected_agent not in ROUTABLE_AGENTS:
+    if selected_agent not in ENABLED_AGENT_NAMES:
         return {
             "selected_agent": ROUTING_ERROR,
             "response": _format_routing_error(
-                f"LLM router returned unsupported agent: {selected_agent}"
+                f"LLM router returned disabled or unsupported agent: {selected_agent}"
             ),
         }
 
@@ -99,7 +149,7 @@ def router_node(state: BioOpsState) -> dict:
 def route_after_router(state: BioOpsState) -> str:
     selected_agent = state.get("selected_agent", ROUTING_ERROR)
 
-    if selected_agent in ROUTABLE_AGENTS:
+    if selected_agent in ENABLED_AGENT_NAMES:
         return selected_agent
 
     return ROUTING_ERROR
@@ -136,43 +186,53 @@ def _format_routing_error(error: str) -> str:
             "Status: routing_error",
             f"Error: {error}",
             "",
-            "The orchestrator now uses LLM-only routing.",
+            "The orchestrator uses LLM-only routing.",
+            "Enabled agents are controlled by configs/agents.yaml.",
             "No keyword fallback was used.",
-            "No agent was started.",
+            "No disabled agent was started.",
         ]
     )
 
 
-graph_builder = StateGraph(BioOpsState)
+def build_graph():
+    graph_builder = StateGraph(BioOpsState)
 
-graph_builder.add_node("router", router_node)
-graph_builder.add_node("general", general_node)
-graph_builder.add_node("knowledge", knowledge_node)
-graph_builder.add_node("cluster_health", cluster_health_node)
-graph_builder.add_node("review", review_node)
-graph_builder.add_node(ROUTING_ERROR, routing_error_node)
+    agent_nodes = {
+        "general": general_node,
+        "knowledge": knowledge_node,
+        "cluster_health": cluster_health_node,
+        "review": review_node,
+    }
 
-graph_builder.set_entry_point("router")
+    graph_builder.add_node("router", router_node)
+    graph_builder.add_node(ROUTING_ERROR, routing_error_node)
 
-graph_builder.add_conditional_edges(
-    "router",
-    route_after_router,
-    {
-        "general": "general",
-        "knowledge": "knowledge",
-        "cluster_health": "cluster_health",
-        "review": "review",
-        ROUTING_ERROR: ROUTING_ERROR,
-    },
-)
+    for agent_name in sorted(ENABLED_AGENT_NAMES):
+        graph_builder.add_node(agent_name, agent_nodes[agent_name])
 
-graph_builder.add_edge("general", END)
-graph_builder.add_edge("knowledge", END)
-graph_builder.add_edge("cluster_health", END)
-graph_builder.add_edge("review", END)
-graph_builder.add_edge(ROUTING_ERROR, END)
+    graph_builder.set_entry_point("router")
 
-graph = graph_builder.compile()
+    route_map = {
+        agent_name: agent_name
+        for agent_name in sorted(ENABLED_AGENT_NAMES)
+    }
+    route_map[ROUTING_ERROR] = ROUTING_ERROR
+
+    graph_builder.add_conditional_edges(
+        "router",
+        route_after_router,
+        route_map,
+    )
+
+    for agent_name in sorted(ENABLED_AGENT_NAMES):
+        graph_builder.add_edge(agent_name, END)
+
+    graph_builder.add_edge(ROUTING_ERROR, END)
+
+    return graph_builder.compile()
+
+
+graph = build_graph()
 
 
 def run_graph(message: str) -> str:

@@ -89,3 +89,51 @@ def test_route_after_router_rejects_removed_echo_agent():
     )
 
     assert result == go.ROUTING_ERROR
+
+
+from bioops.graph_orchestrator import get_enabled_agent_names
+
+
+def test_enabled_agents_loaded_from_yaml_style_config():
+    config = {
+        "agents": {
+            "general": {"enabled": True},
+            "knowledge": {"enabled": True},
+            "cluster_health": {"enabled": False},
+            "review": {"enabled": False},
+        }
+    }
+
+    enabled = get_enabled_agent_names(config)
+
+    assert enabled == {"general", "knowledge"}
+
+
+def test_general_is_mandatory_even_if_disabled():
+    config = {
+        "agents": {
+            "general": {"enabled": False},
+            "knowledge": {"enabled": False},
+            "cluster_health": {"enabled": False},
+            "review": {"enabled": False},
+        }
+    }
+
+    enabled = get_enabled_agent_names(config)
+
+    assert enabled == {"general"}
+
+
+def test_unsupported_agents_are_ignored():
+    config = {
+        "agents": {
+            "general": {"enabled": True},
+            "knowledge": {"enabled": False},
+            "batch_status": {"enabled": True},
+            "submit_master": {"enabled": True},
+        }
+    }
+
+    enabled = get_enabled_agent_names(config)
+
+    assert enabled == {"general"}
