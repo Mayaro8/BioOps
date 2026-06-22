@@ -47,6 +47,9 @@ class ReviewAgent(BaseAgent):
     def run(self, message: str) -> str:
         request = self.github_tool.parse_request(message)
 
+        if request.mode == "parse_error":
+            return self._format_parse_error(request.error)
+
         if request.mode == "pr":
             context = self.github_tool.fetch_pull_request(
                 repo_name=request.repo,
@@ -74,14 +77,26 @@ class ReviewAgent(BaseAgent):
             )
             return self._format_repo_overview_report(context)
 
-        repo_path = self._parse_path(message) or self.default_repo_path
-        return self._review_local_repo(repo_path)
+        if request.mode == "local":
+            repo_path = request.path or self.default_repo_path
+            return self._review_local_repo(repo_path)
 
-    def _parse_path(self, message: str) -> str | None:
-        for token in message.split():
-            if token.startswith("path="):
-                return token.split("=", 1)[1]
-        return None
+        return self._format_parse_error(f"Unsupported review mode: {request.mode}")
+
+    def _format_parse_error(self, error: str | None) -> str:
+        return "\n".join(
+            [
+                "Review request parsing failed",
+                "",
+                "Status: parse_error",
+                f"Error: {error or 'unknown parsing error'}",
+                "",
+                "The Review Agent now uses LLM-only request parsing.",
+                "No regex or keyword fallback was used.",
+                "No GitHub data was fetched.",
+                "No local repository review was run.",
+            ]
+        )
 
     def _format_repo_overview_report(
         self,

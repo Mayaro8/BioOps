@@ -1,9 +1,10 @@
 import os
-import re
 from dataclasses import dataclass, field
 
 from github import Github
 from github.GithubException import GithubException
+
+from bioops.tools.github_request_parser import LLMGitHubRequestParser
 
 
 @dataclass
@@ -36,6 +37,10 @@ class GitHubRequest:
     pr_number: int | None = None
     base: str | None = None
     head: str | None = None
+    path: str | None = None
+    error: str | None = None
+    path: str | None = None
+    error: str | None = None
 
 
 @dataclass
@@ -104,30 +109,34 @@ class GitHubReviewTool:
     This tool does not post comments, approve, merge, close, or modify GitHub.
     """
 
-    def __init__(self, token: str | None = None):
+    def __init__(
+        self,
+        token: str | None = None,
+        request_parser: LLMGitHubRequestParser | None = None,
+    ):
         self.token = token or os.getenv("GITHUB_TOKEN")
+        self.request_parser = request_parser or LLMGitHubRequestParser()
 
     def parse_request(self, message: str) -> GitHubRequest:
-        repo = self._parse_repo(message)
-        pr_number = self._parse_pr_number(message)
-        base = self._parse_key(message, "base")
-        head = self._parse_key(message, "head")
+        parsed = self.request_parser.parse(message)
 
-        lowered = message.lower()
+        if parsed is None:
+            return GitHubRequest(
+                mode="parse_error",
+                error=(
+                    "Could not parse review request with the LLM parser. "
+                    "Check Azure OpenAI configuration or rephrase the request."
+                ),
+            )
 
-        if repo and pr_number is not None:
-            return GitHubRequest(mode="pr", repo=repo, pr_number=pr_number)
-
-        if repo and base and head:
-            return GitHubRequest(mode="compare", repo=repo, base=base, head=head)
-
-        if repo and self._asks_for_open_prs(lowered):
-            return GitHubRequest(mode="open_prs", repo=repo)
-
-        if repo:
-            return GitHubRequest(mode="repo", repo=repo)
-
-        return GitHubRequest(mode="local")
+        return GitHubRequest(
+            mode=parsed["mode"],
+            repo=parsed.get("repo"),
+            pr_number=parsed.get("pr_number"),
+            base=parsed.get("base"),
+            head=parsed.get("head"),
+            path=parsed.get("path"),
+        )
 
     def fetch_pull_request(
         self,
@@ -338,67 +347,6 @@ class GitHubReviewTool:
             return Github(self.token)
 
         return Github()
-
-    def _parse_repo(self, message: str) -> str | None:
-        repo_match = re.search(
-            r"repo=([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)",
-            message,
-        )
-        if repo_match:
-            return repo_match.group(1).removesuffix(".git")
-
-        github_url_match = re.search(
-            r"github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)",
-            message,
-        )
-        if github_url_match:
-            return github_url_match.group(1).removesuffix(".git")
-
-        return None
-
-    def _parse_pr_number(self, message: str) -> int | None:
-        pr_match = re.search(
-            r"(?:pr|pull_request|pull-request)=#?(\d+)",
-            message,
-            flags=re.IGNORECASE,
-        )
-        if pr_match:
-            return int(pr_match.group(1))
-
-        github_url_match = re.search(
-            r"github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/(\d+)",
-            message,
-            flags=re.IGNORECASE,
-        )
-        if github_url_match:
-            return int(github_url_match.group(1))
-
-        plain_match = re.search(r"\bpr\s+#?(\d+)\b", message.lower())
-        if plain_match:
-            return int(plain_match.group(1))
-
-        return None
-
-    def _parse_key(self, message: str, key: str) -> str | None:
-        match = re.search(rf"\b{key}=([^\s]+)", message)
-        if not match:
-            return None
-
-        return match.group(1)
-
-    def _asks_for_open_prs(self, lowered: str) -> bool:
-        phrases = [
-            "open prs",
-            "open pr",
-            "open pull requests",
-            "pull requests",
-            "list prs",
-            "list pr",
-            "check prs",
-            "check pr",
-        ]
-
-        return any(phrase in lowered for phrase in phrases)
 
     def _missing_repo_pr(
         self,
