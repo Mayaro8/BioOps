@@ -8,6 +8,9 @@ from bioops.agents.review_agent import ReviewAgent
 from bioops.tools.llm_router import LLMRouterTool
 
 
+ROUTABLE_AGENTS = {"general", "knowledge", "cluster_health", "review"}
+
+
 class BioOpsState(TypedDict):
     message: str
     selected_agent: str
@@ -43,11 +46,19 @@ def router_node(state: BioOpsState) -> BioOpsState:
     except Exception:
         selected_agent = keyword_route(state["message"])
 
+    if selected_agent not in ROUTABLE_AGENTS:
+        selected_agent = "general"
+
     return {**state, "selected_agent": selected_agent}
 
 
 def route_after_router(state: BioOpsState) -> str:
-    return state["selected_agent"]
+    selected_agent = state["selected_agent"]
+
+    if selected_agent not in ROUTABLE_AGENTS:
+        return "general"
+
+    return selected_agent
 
 
 def general_node(state: BioOpsState) -> BioOpsState:

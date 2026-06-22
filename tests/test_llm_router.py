@@ -7,12 +7,12 @@ def test_parse_valid_router_json():
     tool = LLMRouterTool()
 
     decision = tool._parse_decision(
-        '{"agent": "batch_status", "confidence": 0.88, "reason": "batch progress question"}'
+        '{"agent": "cluster_health", "confidence": 0.88, "reason": "pod status question"}'
     )
 
-    assert decision.agent == "batch_status"
+    assert decision.agent == "cluster_health"
     assert decision.confidence == 0.88
-    assert decision.reason == "batch progress question"
+    assert decision.reason == "pod status question"
 
 
 def test_parse_router_json_inside_markdown_block():

@@ -1,53 +1,27 @@
 agents:
-  echo:
+  general:
     enabled: true
-    description: "Repeats the user message. Used to test the orchestrator."
+    description: "Fallback agent for greetings, unclear requests, and unsupported tasks."
 
   knowledge:
     enabled: true
-    description: "Answers questions about pipeline-v3.0 documentation."
+    description: "Answers questions about BioOps documentation, pipeline metadata, source code, inputs, outputs, and explanations."
 
   cluster_health:
     enabled: true
+    description: "Checks Kubernetes cluster health, pods, logs, unhealthy containers, running steps, cost, and ETA."
     namespace: bioops
     request_timeout_seconds: 5
     log_tail_lines: 50
     cost:
       mode: local_free
-      currency: rubley
+      currency: rub
     step_eta_minutes:
-        bam-to-gvcf: 120
-        gvcf-to-vcf: 45
-        transfer-bam: 10
-        transfer-vcf: 10
-    review:
-      enabled: true
-      description: "Reviews repositories, PRs/MRs, code changes, risks, style, logic issues, and missing tests."
+      bam-to-gvcf: 120
+      gvcf-to-vcf: 45
+      transfer-bam: 10
+      transfer-vcf: 10
 
-  batch_status:
+  review:
     enabled: true
-    description: "Summarizes batch/job progress, running steps, failed steps, and completion status."
-    argo_namespace: argo
-  
-  submit_master:
-    enabled: true
-    description: "Prepares and optionally submits Argo workflows for pipeline jobs."
-    dry_run_only: false
-    argo_namespace: argo
-    workflow_file: configs/workflows/bioops-fake-gvcf2vcf-workflow.yaml
-  
-  storage:
-    enabled: true
-    description: "Answers read-only questions about bucket contents, prefixes, file counts, and storage size."
-    bucket_name:
-    inventory_path:
-    default_prefix:
-  infra_cost:
-    enabled: true
-    description: "Monitors infrastructure health, cloud cost, ClickHouse, queues, and Cloud Functions."
-    yandex_cloud_id:
-    yandex_folder_id:
-    yandex_service_account_key_path:
-    clickhouse_dsn:
-    queue_url:
-    cloud_functions_endpoint:
+    description: "Reviews repositories, PRs/MRs, code changes, risks, style, logic issues, and missing tests."

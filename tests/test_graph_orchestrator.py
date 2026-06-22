@@ -13,7 +13,7 @@ def test_router_selects_knowledge_for_gvcf():
     assert result["selected_agent"] == "knowledge"
 
 
-def test_router_selects_echo_for_unrelated_message():
+def test_router_selects_general_for_unrelated_message():
     state = {
         "message": "hello there",
         "selected_agent": "",
