@@ -186,16 +186,25 @@ class ReviewAgent(BaseAgent):
             ]
         )
 
-        lines.extend(f"- {item}" for item in issues) if issues else lines.append("- none")
+        if issues:
+            lines.extend(f"- {item}" for item in issues)
+        else:
+            lines.append("- none")
 
         lines.extend(["", "Risks:"])
-        lines.extend(f"- {item}" for item in risks) if risks else lines.append("- none")
+        if risks:
+            lines.extend(f"- {item}" for item in risks)
+        else:
+            lines.append("- none")
 
         lines.extend(["", "Style / logic remarks:"])
         lines.append("- Repository overview only; no patch-level logic review was performed.")
 
         lines.extend(["", "Suggestions:"])
-        lines.extend(f"- {item}" for item in suggestions) if suggestions else lines.append("- none")
+        if suggestions:
+            lines.extend(f"- {item}" for item in suggestions)
+        else:
+            lines.append("- none")
 
         lines.extend(
             [
@@ -452,16 +461,28 @@ class ReviewAgent(BaseAgent):
             lines.append("- none")
 
         lines.extend(["", "Found issues:"])
-        lines.extend(f"- {item}" for item in issues) if issues else lines.append("- none")
+        if issues:
+            lines.extend(f"- {item}" for item in issues)
+        else:
+            lines.append("- none")
 
         lines.extend(["", "Risks:"])
-        lines.extend(f"- {item}" for item in risks) if risks else lines.append("- none")
+        if risks:
+            lines.extend(f"- {item}" for item in risks)
+        else:
+            lines.append("- none")
 
         lines.extend(["", "Style / logic remarks:"])
-        lines.extend(f"- {item}" for item in remarks) if remarks else lines.append("- none")
+        if remarks:
+            lines.extend(f"- {item}" for item in remarks)
+        else:
+            lines.append("- none")
 
         lines.extend(["", "Suggestions:"])
-        lines.extend(f"- {item}" for item in suggestions) if suggestions else lines.append("- none")
+        if suggestions:
+            lines.extend(f"- {item}" for item in suggestions)
+        else:
+            lines.append("- none")
 
         lines.extend(
             [
@@ -698,15 +719,24 @@ class ReviewAgent(BaseAgent):
             "Changed files:",
         ]
 
-        lines.extend(f"- {file}" for file in changed_files[:20]) if changed_files else lines.append("- none")
+        if changed_files:
+            lines.extend(f"- {file}" for file in changed_files[:20])
+        else:
+            lines.append("- none")
 
         lines.extend(["", "Syntax check:", f"- {syntax_result}"])
 
         lines.extend(["", "Risks:"])
-        lines.extend(f"- {item}" for item in risks) if risks else lines.append("- No major deterministic risks detected.")
+        if risks:
+            lines.extend(f"- {item}" for item in risks)
+        else:
+            lines.append("- No major deterministic risks detected.")
 
         lines.extend(["", "Suggestions:"])
-        lines.extend(f"- {item}" for item in suggestions) if suggestions else lines.append("- No immediate suggestions.")
+        if suggestions:
+            lines.extend(f"- {item}" for item in suggestions)
+        else:
+            lines.append("- No immediate suggestions.")
 
         lines.extend(
             [
