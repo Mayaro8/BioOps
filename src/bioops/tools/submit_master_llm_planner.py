@@ -138,7 +138,7 @@ Rules:
   intent = monitor.
 - If user asks for failed pods or failure causes:
   intent = failed_pods.
-- If user asks to restart failed pods:
+- If user asks to restart, retry, or rerun failed pods/workflows:
   intent = restart_failed_pods.
 - If user only asks what parameters/config are needed:
   intent = explain_config.

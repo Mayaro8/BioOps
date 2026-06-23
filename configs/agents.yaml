@@ -30,6 +30,8 @@ agents:
     enabled: true
     description: "Generates original-compatible submit-master configs, prepares safe launch plans, monitors submit-master runs, and reports failed pods."
     allow_launch: false
+    allow_restart: false
+    argo_command: "argo"
     argo_namespace: argo
     workflow_file: ""
     submit_master_entrypoint: ""

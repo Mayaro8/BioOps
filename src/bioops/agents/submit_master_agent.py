@@ -20,6 +20,10 @@ from bioops.tools.submit_master_monitor import (
     SubmitMasterMonitor,
     SubmitMasterMonitorRequest,
 )
+from bioops.tools.submit_master_restart import (
+    SubmitMasterRestartRequest,
+    SubmitMasterRestartTool,
+)
 from bioops.tools.submit_master_parameter_matcher import (
     StepMatchResult,
     SubmitMasterParameterMatcher,
@@ -48,6 +52,7 @@ class SubmitMasterAgent(BaseAgent):
         submit_tool: SubmitMasterTool | None = None,
         monitor: SubmitMasterMonitor | None = None,
         failed_pod_reporter: SubmitMasterFailedPodReporter | None = None,
+        restart_tool: SubmitMasterRestartTool | None = None,
         planner: SubmitMasterLLMPlanner | None = None,
         matcher: SubmitMasterParameterMatcher | None = None,
         config_path: str = "configs/agents.yaml",
@@ -77,6 +82,11 @@ class SubmitMasterAgent(BaseAgent):
         self.failed_pod_reporter = failed_pod_reporter or SubmitMasterFailedPodReporter(
             argo_tool=argo_tool
         )
+        self.restart_tool = restart_tool or SubmitMasterRestartTool(
+            failed_pod_reporter=self.failed_pod_reporter,
+            allow_restart=bool(self.submit_config.get("allow_restart", False)),
+            argo_command=self.submit_config.get("argo_command", "argo"),
+        )
         self.planner = planner or SubmitMasterLLMPlanner()
         self.matcher = matcher or SubmitMasterParameterMatcher()
 
@@ -93,7 +103,7 @@ class SubmitMasterAgent(BaseAgent):
             return self._format_refusal(decision)
 
         if decision.intent == "restart_failed_pods":
-            return self._format_restart_not_implemented(decision)
+            return self._run_restart_failed_pods(decision)
 
         if decision.intent == "monitor":
             return self._run_monitor(decision)
