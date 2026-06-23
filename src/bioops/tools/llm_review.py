@@ -3,6 +3,10 @@ import os
 from openai import AzureOpenAI
 
 
+class LLMReviewError(RuntimeError):
+    """Raised when mandatory LLM patch review cannot be completed."""
+
+
 class LLMReviewTool:
     """Uses Azure OpenAI to perform concise architecture and code review."""
 
@@ -36,9 +40,20 @@ class LLMReviewTool:
 
     def review_prompt(self, prompt: str) -> str:
         if not self.enabled or self.client is None:
-            return (
-                "LLM review unavailable: Azure OpenAI environment variables "
-                "are not fully configured."
+            missing = []
+            if not self.endpoint:
+                missing.append("AZURE_OPENAI_ENDPOINT")
+            if not self.api_key:
+                missing.append("AZURE_OPENAI_API_KEY")
+            if not self.api_version:
+                missing.append("AZURE_OPENAI_API_VERSION")
+            if not self.deployment:
+                missing.append("AZURE_OPENAI_CHAT_DEPLOYMENT")
+
+            missing_text = ", ".join(missing) if missing else "unknown Azure OpenAI config"
+            raise LLMReviewError(
+                "LLM patch review could not be started: "
+                f"missing configuration: {missing_text}"
             )
 
         system_prompt = (
@@ -69,8 +84,16 @@ class LLMReviewTool:
                     max_tokens=5000,
                 )
             except Exception as error:
-                return f"LLM review failed: {type(error).__name__}: {error}"
+                raise LLMReviewError(
+                    f"LLM patch review failed: {type(error).__name__}: {error}"
+                ) from error
         except Exception as error:
-            return f"LLM review failed: {type(error).__name__}: {error}"
+            raise LLMReviewError(
+                f"LLM patch review failed: {type(error).__name__}: {error}"
+            ) from error
 
-        return response.choices[0].message.content or "LLM review returned no content."
+        content = response.choices[0].message.content
+        if not content:
+            raise LLMReviewError("LLM patch review failed: model returned no content.")
+
+        return content
