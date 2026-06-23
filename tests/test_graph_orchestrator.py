@@ -130,7 +130,7 @@ def test_unsupported_agents_are_ignored():
             "general": {"enabled": True},
             "knowledge": {"enabled": False},
             "batch_status": {"enabled": True},
-            "submit_master": {"enabled": True},
+            "storage": {"enabled": True},
         }
     }
 

@@ -9,6 +9,7 @@ def test_default_allowed_agents_are_supported_agents():
         "knowledge",
         "cluster_health",
         "review",
+        "submit_master",
     }
 
 

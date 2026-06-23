@@ -25,3 +25,15 @@ agents:
   review:
     enabled: true
     description: "Reviews repositories, PRs/MRs, code changes, risks, style, logic issues, and missing tests."
+
+  submit_master:
+    enabled: true
+    description: "Generates original-compatible submit-master configs, prepares safe launch plans, monitors submit-master runs, and reports failed pods."
+    allow_launch: false
+    argo_namespace: argo
+    workflow_file: ""
+    submit_master_entrypoint: ""
+    generated_config_dir: "logs/submit_master_configs"
+    contour: "prod"
+    python_executable: "python3"
+    launch_timeout_seconds: 900

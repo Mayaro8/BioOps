@@ -6,7 +6,7 @@ from typing import Any
 from openai import AzureOpenAI
 
 
-DEFAULT_ALLOWED_AGENTS = {"general", "knowledge", "cluster_health", "review"}
+DEFAULT_ALLOWED_AGENTS = {"general", "knowledge", "cluster_health", "review", "submit_master"}
 
 # Backward-compatible alias for older imports/tests.
 ALLOWED_AGENTS = DEFAULT_ALLOWED_AGENTS
@@ -130,6 +130,10 @@ class LLMRouterTool:
             "review": (
                 "code review, repository review, GitHub pull requests, branch comparison, "
                 "diffs, suspicious files, implementation risks, or missing tests"
+            ),
+            "submit_master": (
+                "submit-master config generation, original-compatible pipeline submission configs, "
+                "safe submit-master launch plans, Argo workflow launch preparation, failed submit-master runs"
             ),
         }
 

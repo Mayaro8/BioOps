@@ -8,13 +8,14 @@ from bioops.agents.cluster_health_agent import ClusterHealthAgent
 from bioops.agents.general_agent import GeneralAgent
 from bioops.agents.knowledge_agent import KnowledgeAgent
 from bioops.agents.review_agent import ReviewAgent
+from bioops.agents.submit_master_agent import SubmitMasterAgent
 from bioops.tools.llm_router import LLMRouterTool
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 AGENTS_CONFIG_PATH = PROJECT_ROOT / "configs" / "agents.yaml"
 
-SUPPORTED_AGENTS = {"general", "knowledge", "cluster_health", "review"}
+SUPPORTED_AGENTS = {"general", "knowledge", "cluster_health", "review", "submit_master"}
 MANDATORY_AGENTS = {"general"}
 ROUTING_ERROR = "routing_error"
 
@@ -29,6 +30,7 @@ general_agent: GeneralAgent | None = None
 knowledge_agent: KnowledgeAgent | None = None
 review_agent: ReviewAgent | None = None
 cluster_health_agent: ClusterHealthAgent | None = None
+submit_master_agent: SubmitMasterAgent | None = None
 
 _llm_router_tool: LLMRouterTool | None = None
 # Compatibility hook for tests. This is intentionally None on import,
@@ -114,6 +116,7 @@ def reset_orchestrator_cache() -> None:
     global knowledge_agent
     global review_agent
     global cluster_health_agent
+    global submit_master_agent
     global _llm_router_tool
     global llm_router_tool
     global _active_enabled_agent_names
@@ -123,6 +126,7 @@ def reset_orchestrator_cache() -> None:
     knowledge_agent = None
     review_agent = None
     cluster_health_agent = None
+    submit_master_agent = None
     _llm_router_tool = None
     llm_router_tool = None
     _active_enabled_agent_names = None
@@ -163,6 +167,15 @@ def get_cluster_health_agent() -> ClusterHealthAgent:
         cluster_health_agent = ClusterHealthAgent()
 
     return cluster_health_agent
+
+
+def get_submit_master_agent() -> SubmitMasterAgent:
+    global submit_master_agent
+
+    if submit_master_agent is None:
+        submit_master_agent = SubmitMasterAgent()
+
+    return submit_master_agent
 
 
 def router_node(state: BioOpsState) -> dict:
@@ -226,6 +239,10 @@ def review_node(state: BioOpsState) -> dict:
     return {"response": get_review_agent().run(state["message"])}
 
 
+def submit_master_node(state: BioOpsState) -> dict:
+    return {"response": get_submit_master_agent().run(state["message"])}
+
+
 def routing_error_node(state: BioOpsState) -> dict:
     return {
         "response": state.get("response")
@@ -259,6 +276,7 @@ def build_graph():
         "knowledge": knowledge_node,
         "cluster_health": cluster_health_node,
         "review": review_node,
+        "submit_master": submit_master_node,
     }
 
     graph_builder.add_node("router", router_node)
