@@ -21,23 +21,21 @@ VALID_INTENTS = {
 @dataclass
 class SubmitMasterPlannerDecision:
     intent: str
-    ready: bool
+    candidate_stage: str | None = None
+    candidate_step: str | None = None
+    candidate_platform: str | None = None
     provided_parameters: dict[str, Any] = field(default_factory=dict)
-    required_parameters: list[str] = field(default_factory=list)
-    missing_parameters: list[str] = field(default_factory=list)
-    recommendations: list[str] = field(default_factory=list)
-    questions: list[str] = field(default_factory=list)
+    user_confirmed: bool = False
     explanation: str = ""
     refusal_reason: str = ""
 
 
 class SubmitMasterLLMPlanner:
     """
-    Converts natural-language Submit Master requests into strict JSON plans.
+    LLM-only interpretation layer for Submit Master requests.
 
-    This tool does not launch workflows and does not mutate infrastructure.
-    It only plans, compares provided vs required parameters, and asks for
-    missing information when the request is incomplete.
+    It does not launch anything. It converts a user message into a strict JSON
+    decision. Python then validates parameters and safety.
     """
 
     def __init__(self) -> None:
@@ -75,8 +73,7 @@ class SubmitMasterLLMPlanner:
     ) -> SubmitMasterPlannerDecision:
         if not self.enabled or self.client is None:
             raise RuntimeError(
-                "Submit Master LLM planner unavailable: Azure OpenAI environment "
-                "variables are not fully configured."
+                "Azure OpenAI is not configured for Submit Master LLM planning."
             )
 
         prompt = self._build_prompt(message=message, context=context)
@@ -88,14 +85,11 @@ class SubmitMasterLLMPlanner:
                     {
                         "role": "system",
                         "content": (
-                            "You are a strict planning layer for a bioinformatics "
-                            "Submit Master agent. Return JSON only."
+                            "You are a strict JSON planning layer for a "
+                            "bioinformatics Submit Master agent."
                         ),
                     },
-                    {
-                        "role": "user",
-                        "content": prompt,
-                    },
+                    {"role": "user", "content": prompt},
                 ],
                 max_completion_tokens=1200,
             )
@@ -106,63 +100,65 @@ class SubmitMasterLLMPlanner:
                     {
                         "role": "system",
                         "content": (
-                            "You are a strict planning layer for a bioinformatics "
-                            "Submit Master agent. Return JSON only."
+                            "You are a strict JSON planning layer for a "
+                            "bioinformatics Submit Master agent."
                         ),
                     },
-                    {
-                        "role": "user",
-                        "content": prompt,
-                    },
+                    {"role": "user", "content": prompt},
                 ],
                 max_tokens=1200,
             )
-        except Exception as error:
-            raise RuntimeError(
-                f"Submit Master LLM planner request failed: {type(error).__name__}: {error}"
-            ) from error
 
         content = response.choices[0].message.content or ""
         return self._parse_response(content)
 
     def _build_prompt(self, message: str, context: dict[str, Any]) -> str:
         return f"""
-Convert the user request into a strict JSON planning decision for Submit Master.
+Convert the user request into strict JSON for Submit Master planning.
 
-The Submit Master agent prepares original-compatible submit-master JSON configs,
-safe launch plans, monitoring reports, and failed-pod reports.
+Do not invent missing values. Do not launch anything. Do not claim a config is
+ready. Only extract intent, likely stage, likely step, likely platform, and
+provided parameters.
 
-Do not invent missing deployment values.
-Do not assume sample IDs, batch IDs, clusters, namespaces, stages, or steps.
-If required information is missing, set ready=false and ask targeted questions.
-If the request is unsafe, unsupported, or unclear, set intent="refuse" or ready=false.
-A real launch is only possible when the user clearly requests confirmation, but
-Python code will enforce the final safety gate using YAML allow_launch.
+Python code will compare provided parameters to required parameters and decide
+whether the request is complete.
 
 Valid intents:
-- build_or_launch: generate config and possibly prepare/launch Submit Master
-- monitor: monitor running/completed Submit Master workflows
-- failed_pods: report failed pods and log-derived causes
-- restart_failed_pods: restart failed pods; currently not implemented, refuse safely
-- explain_config: explain which parameters are needed and why
-- refuse: refuse or ask user to rephrase safely
+- build_or_launch
+- monitor
+- failed_pods
+- restart_failed_pods
+- explain_config
+- refuse
 
-Important required-parameter rules:
-- For build_or_launch, compare the user-provided values to the required config values:
-  stage, step or steps_order, seq_type, cluster_name, namespace, and either sample_ids or batch_id.
-- If batch_id is used and mongo_cluster_name is required by the deployment context, ask for it.
-- For monitor, require batch_id or workflow_name.
-- For failed_pods, require batch_id or workflow_name.
-- For restart_failed_pods, refuse because D5 is not implemented yet.
-- Always include required_parameters, provided_parameters, missing_parameters, recommendations, and questions.
+Rules:
+- If user asks to generate, prepare, run, launch, or submit a pipeline step:
+  intent = build_or_launch.
+- If user asks for status, logs, cost, ETA, or running state:
+  intent = monitor.
+- If user asks for failed pods or failure causes:
+  intent = failed_pods.
+- If user asks to restart failed pods:
+  intent = restart_failed_pods.
+- If user only asks what parameters/config are needed:
+  intent = explain_config.
+- If request is unrelated or unsafe:
+  intent = refuse.
+- If the user explicitly says confirm=true or clearly confirms launch, set user_confirmed=true.
+- If user provides stage directly, preserve it.
+- If user provides platform/sequencing type, map it to candidate_platform and seq_type.
+- Keep all useful parameters in provided_parameters.
+- Return JSON only.
 
-Context from YAML/environment/known Submit Master maps:
+Context:
 {json.dumps(context, indent=2, sort_keys=True)}
 
-Return JSON only with exactly this shape:
+Return exactly this JSON shape:
 {{
-  "intent": "build_or_launch|monitor|failed_pods|restart_failed_pods|explain_config|refuse",
-  "ready": true,
+  "intent": "build_or_launch",
+  "candidate_stage": null,
+  "candidate_step": null,
+  "candidate_platform": null,
   "provided_parameters": {{
     "stage": null,
     "step": null,
@@ -183,10 +179,7 @@ Return JSON only with exactly this shape:
     "contour": null,
     "extra_params": {{}}
   }},
-  "required_parameters": [],
-  "missing_parameters": [],
-  "recommendations": [],
-  "questions": [],
+  "user_confirmed": false,
   "explanation": "short explanation",
   "refusal_reason": ""
 }}
@@ -199,29 +192,23 @@ User request:
         data = self._parse_json(content)
 
         if not isinstance(data, dict):
-            raise ValueError("Submit Master LLM planner returned invalid JSON.")
+            raise ValueError("Submit Master planner returned invalid JSON.")
 
         intent = str(data.get("intent", "")).strip().lower()
         if intent not in VALID_INTENTS:
-            raise ValueError(f"Submit Master LLM planner returned invalid intent: {intent}")
+            raise ValueError(f"Invalid Submit Master intent: {intent}")
 
-        provided = data.get("provided_parameters", {})
+        provided = data.get("provided_parameters") or {}
         if not isinstance(provided, dict):
             provided = {}
 
-        required = data.get("required_parameters", [])
-        missing = data.get("missing_parameters", [])
-        recommendations = data.get("recommendations", [])
-        questions = data.get("questions", [])
-
         return SubmitMasterPlannerDecision(
             intent=intent,
-            ready=bool(data.get("ready", False)),
+            candidate_stage=self._string_or_none(data.get("candidate_stage")),
+            candidate_step=self._string_or_none(data.get("candidate_step")),
+            candidate_platform=self._string_or_none(data.get("candidate_platform")),
             provided_parameters=provided,
-            required_parameters=self._string_list(required),
-            missing_parameters=self._string_list(missing),
-            recommendations=self._string_list(recommendations),
-            questions=self._string_list(questions),
+            user_confirmed=bool(data.get("user_confirmed", False)),
             explanation=str(data.get("explanation", "") or "").strip(),
             refusal_reason=str(data.get("refusal_reason", "") or "").strip(),
         )
@@ -233,13 +220,10 @@ User request:
             cleaned = cleaned.removeprefix("```json").removeprefix("```").strip()
             cleaned = cleaned.removesuffix("```").strip()
 
-        try:
-            return json.loads(cleaned)
-        except json.JSONDecodeError:
+        return json.loads(cleaned)
+
+    def _string_or_none(self, value: Any) -> str | None:
+        if value is None:
             return None
-
-    def _string_list(self, value: Any) -> list[str]:
-        if not isinstance(value, list):
-            return []
-
-        return [str(item) for item in value if str(item).strip()]
+        text = str(value).strip()
+        return text or None
