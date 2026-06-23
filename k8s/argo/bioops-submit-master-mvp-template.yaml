@@ -1,0 +1,35 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: bioops-submit-master-mvp
+  namespace: argo
+spec:
+  entrypoint: run-step
+  arguments:
+    parameters:
+      - name: stage
+      - name: step
+      - name: seq_type
+      - name: batch_id
+      - name: sample_ids
+        value: ""
+      - name: cluster_name
+      - name: namespace
+        value: bioops
+  templates:
+    - name: run-step
+      container:
+        image: python:3.12-slim
+        command: [python, -c]
+        args:
+          - |
+            import os
+            print("BioOps Argo MVP workflow started")
+            print("stage={{workflow.parameters.stage}}")
+            print("step={{workflow.parameters.step}}")
+            print("seq_type={{workflow.parameters.seq_type}}")
+            print("batch_id={{workflow.parameters.batch_id}}")
+            print("sample_ids={{workflow.parameters.sample_ids}}")
+            print("cluster_name={{workflow.parameters.cluster_name}}")
+            print("namespace={{workflow.parameters.namespace}}")
+            print("BioOps Argo MVP workflow completed")

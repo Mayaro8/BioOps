@@ -1,15 +1,15 @@
 agents:
   general:
     enabled: true
-    description: "Fallback agent for greetings, unclear requests, and unsupported tasks."
-
+    description: Fallback agent for greetings, unclear requests, and unsupported tasks.
   knowledge:
     enabled: true
-    description: "Answers questions about BioOps documentation, pipeline metadata, source code, inputs, outputs, and explanations."
-
+    description: Answers questions about BioOps documentation, pipeline metadata,
+      source code, inputs, outputs, and explanations.
   cluster_health:
     enabled: true
-    description: "Checks Kubernetes cluster health, pods, logs, unhealthy containers, running steps, cost, and ETA."
+    description: Checks Kubernetes cluster health, pods, logs, unhealthy containers,
+      running steps, cost, and ETA.
     namespace: bioops
     request_timeout_seconds: 5
     log_tail_lines: 50
@@ -21,21 +21,27 @@ agents:
       gvcf-to-vcf: 45
       transfer-bam: 10
       transfer-vcf: 10
-
   review:
     enabled: true
-    description: "Reviews repositories, PRs/MRs, code changes, risks, style, logic issues, and missing tests."
-
+    description: Reviews repositories, PRs/MRs, code changes, risks, style, logic
+      issues, and missing tests.
   submit_master:
     enabled: true
-    description: "Generates original-compatible submit-master configs, prepares safe launch plans, monitors submit-master runs, and reports failed pods."
+    description: Generates original-compatible submit-master configs, prepares safe
+      launch plans, monitors submit-master runs, reports failed pods, and safely retries
+      failed workflows.
     allow_launch: false
     allow_restart: false
-    argo_command: "argo"
+    argo_command: argo
     argo_namespace: argo
-    workflow_file: ""
-    submit_master_entrypoint: ""
-    generated_config_dir: "logs/submit_master_configs"
-    contour: "prod"
-    python_executable: "python3"
+    workflow_file: ''
+    submit_master_entrypoint: ''
+    generated_config_dir: logs/submit_master_configs
+    contour: prod
+    python_executable: python3
     launch_timeout_seconds: 900
+    launch_backend: argo_api
+    k8s_namespace: bioops
+    namespace: bioops
+    argo_workflow_template: bioops-submit-master-mvp
+    argo_generate_name_prefix: bioops-submit-master-
