@@ -2,34 +2,33 @@ services:
   qdrant:
     image: qdrant/qdrant:latest
     container_name: bioops-qdrant
-    network_mode: host
+    ports:
+      - "6333:6333"
+      - "6334:6334"
     volumes:
       - qdrant_storage:/qdrant/storage
 
   bioops:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: bioops-app
-    network_mode: host
-    depends_on:
-      - qdrant
+    working_dir: /app
+    env_file:
+      - .env
     environment:
-      PYTHONPATH: /app/src
-      QDRANT_URL: http://localhost:6333
-      ALERT_CHANNEL: ${ALERT_CHANNEL:-console}
-      BITRIX_WEBHOOK_URL: ${BITRIX_WEBHOOK_URL:-}
-      BITRIX_DIALOG_ID: ${BITRIX_DIALOG_ID:-}
-      AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT:-}
-      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
-      AZURE_OPENAI_API_VERSION: ${AZURE_OPENAI_API_VERSION:-}
-      AZURE_OPENAI_CHAT_DEPLOYMENT: ${AZURE_OPENAI_CHAT_DEPLOYMENT:-}
-      AZURE_OPENAI_EMBEDDING_DEPLOYMENT: ${AZURE_OPENAI_EMBEDDING_DEPLOYMENT:-}
+      - PYTHONPATH=/app/src
+      - QDRANT_URL=http://localhost:6333
+      - QDRANT_COLLECTION=bioops_knowledge
     volumes:
       - .:/app
-      - ${HOME}/.kube:/root/.kube:ro
-      - ${HOME}/.minikube:${HOME}/.minikube:ro
+      - ~/.kube:/root/.kube:ro
+      - ~/.minikube:/root/.minikube:ro
+    depends_on:
+      - qdrant
     stdin_open: true
     tty: true
-    command: python -m bioops.main
+    network_mode: host
 
 volumes:
   qdrant_storage:

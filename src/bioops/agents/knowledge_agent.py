@@ -2,6 +2,7 @@ from bioops.agents.base import BaseAgent
 from bioops.rag.chat import AzureChatClient
 from bioops.rag.embeddings import AzureEmbeddingClient
 from bioops.rag.qdrant_store import QdrantKnowledgeStore
+from bioops.tools.llm_query_rewriter import LLMQueryRewriter
 
 
 class KnowledgeAgent(BaseAgent):
@@ -10,15 +11,24 @@ class KnowledgeAgent(BaseAgent):
     name = "knowledge"
     description = "Answers questions using BioOps documentation and Qdrant RAG."
 
-    def __init__(self, top_k: int = 5):
+    def __init__(
+        self,
+        top_k: int = 5,
+        query_rewriter: LLMQueryRewriter | None = None,
+    ):
         self.top_k = top_k
+        self.query_rewriter = query_rewriter or LLMQueryRewriter()
         self.embedder = AzureEmbeddingClient()
         self.store = QdrantKnowledgeStore()
         self.chat = AzureChatClient()
 
     def run(self, message: str) -> str:
-        expanded_query = self._expand_query(message)
-        query_vector = self.embedder.embed_text(expanded_query)
+        try:
+            rewritten_query = self.query_rewriter.rewrite(message)
+        except Exception as error:
+            return self._format_query_rewrite_error(error)
+
+        query_vector = self.embedder.embed_text(rewritten_query)
         chunks = self.store.search(query_vector, limit=self.top_k)
 
         if not chunks:
@@ -31,39 +41,16 @@ class KnowledgeAgent(BaseAgent):
 
         return answer.strip()
 
-    def _expand_query(self, message: str) -> str:
-        """Expand short user queries to improve vector retrieval."""
-        message_clean = message.strip()
-
-        expansion_terms = [
-            "BioOps",
-            "pipeline-v3.0",
-            "pipeline step",
-            "input data",
-            "output data",
-            "run parameters",
-            "documentation",
-            "repository",
-        ]
-
-        domain_terms = {
-            "gvcf": "bam to gvcf gvcf to vcf haplotype caller variant calling output gvcf file",
-            "bam": "bam file alignment input haplotype caller bam to gvcf",
-            "vcf": "vcf file variant calling gvcf to vcf output",
-            "haplotype": "haplotype caller bam to gvcf variant calling",
-        }
-
-        extra_terms = []
-        message_lower = message_clean.lower()
-
-        for keyword, terms in domain_terms.items():
-            if keyword in message_lower:
-                extra_terms.append(terms)
-
-        if len(message_clean.split()) <= 3:
-            extra_terms.extend(expansion_terms)
-
-        if not extra_terms:
-            return message_clean
-
-        return f"{message_clean}\n\nSearch context: {' '.join(extra_terms)}"
+    def _format_query_rewrite_error(self, error: Exception) -> str:
+        return "\n".join(
+            [
+                "Knowledge query rewriting failed",
+                "",
+                "Status: query_rewrite_error",
+                f"Error: {type(error).__name__}: {error}",
+                "",
+                "The Knowledge Agent now uses LLM-only query rewriting.",
+                "No keyword expansion fallback was used.",
+                "No Qdrant search was run.",
+            ]
+        )
