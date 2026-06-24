@@ -28,6 +28,7 @@ from bioops.tools.submit_master_parameter_matcher import (
     StepMatchResult,
     SubmitMasterParameterMatcher,
 )
+from bioops.tools.submit_master_interpreter import SubmitMasterInterpreter
 from bioops.tools.submit_master_tool import SubmitMasterTool, SubmitRequest, SubmitPlan
 
 
@@ -55,6 +56,7 @@ class SubmitMasterAgent(BaseAgent):
         restart_tool: SubmitMasterRestartTool | None = None,
         planner: SubmitMasterLLMPlanner | None = None,
         matcher: SubmitMasterParameterMatcher | None = None,
+        interpreter: SubmitMasterInterpreter | None = None,
         config_path: str = "configs/agents.yaml",
     ):
         self.config = self._load_config(config_path)
@@ -89,6 +91,7 @@ class SubmitMasterAgent(BaseAgent):
         )
         self.planner = planner or SubmitMasterLLMPlanner()
         self.matcher = matcher or SubmitMasterParameterMatcher()
+        self.interpreter = interpreter or SubmitMasterInterpreter(self.matcher)
 
     def run(self, message: str) -> str:
         try:
@@ -113,7 +116,8 @@ class SubmitMasterAgent(BaseAgent):
 
         if decision.intent in {"build_or_launch", "explain_config"}:
             merged_parameters = self._merge_defaults(decision.provided_parameters)
-            match = self.matcher.match(
+            interpretation = self.interpreter.interpret(
+                message=message,
                 provided_parameters=merged_parameters,
                 candidate_stage=decision.candidate_stage or self._string_or_none(merged_parameters.get("stage")),
                 candidate_step=decision.candidate_step or self._string_or_none(
@@ -122,6 +126,23 @@ class SubmitMasterAgent(BaseAgent):
                 candidate_platform=decision.candidate_platform or self._string_or_none(
                     merged_parameters.get("seq_type")
                 ),
+            )
+            if interpretation.status == "needs_clarification":
+                return self._format_clarification(decision, interpretation)
+
+            match = self.matcher.match(
+                provided_parameters=merged_parameters,
+                candidate_stage=interpretation.candidate_stage
+                or decision.candidate_stage
+                or self._string_or_none(merged_parameters.get("stage")),
+                candidate_step=interpretation.candidate_step
+                or decision.candidate_step
+                or self._string_or_none(
+                    merged_parameters.get("step") or merged_parameters.get("steps_order")
+                ),
+                candidate_platform=interpretation.candidate_platform
+                or decision.candidate_platform
+                or self._string_or_none(merged_parameters.get("seq_type")),
             )
 
             if decision.intent == "explain_config":
@@ -327,6 +348,27 @@ class SubmitMasterAgent(BaseAgent):
         ]
 
         return {key: bool(os.getenv(key)) for key in keys}
+
+    def _format_clarification(self, decision: SubmitMasterPlannerDecision, interpretation: Any) -> str:
+        lines = [
+            "Submit Master needs clarification",
+            "",
+            f"Intent: {decision.intent}",
+            f"Interpretation: {interpretation.explanation}",
+            "",
+            interpretation.clarification_question or "Please clarify the requested Submit Master step.",
+        ]
+        if interpretation.alternatives:
+            lines.extend(["", "Possible matches:"])
+            lines.extend(f"- {item}" for item in interpretation.alternatives)
+        lines.extend(
+            [
+                "",
+                "No config was generated.",
+                "No launch or restart was attempted.",
+            ]
+        )
+        return "\n".join(lines)
 
     def _format_ready_for_confirmation(
         self,
