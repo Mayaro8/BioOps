@@ -27,21 +27,10 @@ agents:
       issues, and missing tests.
   submit_master:
     enabled: true
-    description: Generates original-compatible submit-master configs, prepares safe
-      launch plans, monitors submit-master runs, reports failed pods, and safely retries
-      failed workflows.
-    allow_launch: false
-    allow_restart: false
-    argo_command: argo
+    description: Opens Argo UI for launching the local SubmitMaster workflow.
     argo_namespace: argo
-    workflow_file: ''
-    submit_master_entrypoint: ''
-    generated_config_dir: logs/submit_master_configs
-    contour: prod
-    python_executable: python3
-    launch_timeout_seconds: 900
-    launch_backend: argo_api
-    k8s_namespace: bioops
-    namespace: bioops
-    argo_workflow_template: bioops-submit-master-mvp
-    argo_generate_name_prefix: bioops-submit-master-
+    argo_service_name: argo-server
+    argo_local_port: 2746
+    argo_remote_port: 2746
+    argo_ui_url: https://localhost:2746
+    argo_workflow_template: bioops-submit-master-local
