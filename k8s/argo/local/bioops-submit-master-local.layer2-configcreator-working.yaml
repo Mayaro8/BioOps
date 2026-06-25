@@ -164,16 +164,6 @@ spec:
 
             echo "Checking Argo CLI:"
             argo version --short
-
-            echo "=== Patching config for local Argo MVP ==="
-            python -c 'import json; from pathlib import Path; p=Path("/mnt/pipeline-v3.0/generated/submit-master-config.json"); data=json.loads(p.read_text()); [w.update({"k8s_cluster_name":"","namespace":"argo"}) for w in data]; p.write_text(json.dumps(data, indent=2))'
-
-            echo "Patched local SubmitMaster config:"
-            cat "${CONFIG}"
-
-            echo "=== Launching real SubmitMaster ==="
-            cd /app
-            python main.py --config "${CONFIG}"
         volumeMounts:
           - name: pipeline-v3
             mountPath: /mnt/pipeline-v3.0
