@@ -1,0 +1,54 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: bioops-submit-master-local
+  namespace: argo
+spec:
+  entrypoint: submit-master-smoke-test
+
+  arguments:
+    parameters:
+      - name: batch_id
+        value: batch140325
+      - name: batch_date_id
+        value: "140325"
+      - name: samples_ids_str
+        value: "sample1,sample2"
+      - name: stage
+        value: stage1
+      - name: mode
+        value: test
+      - name: seq_type
+        value: illumina
+      - name: cluster_name
+        value: "3"
+      - name: mongo_cluster_name
+        value: "5"
+      - name: namespace
+        value: default
+
+  templates:
+    - name: submit-master-smoke-test
+      container:
+        image: alpine:3.20
+        command: [sh, -c]
+        args:
+          - |
+            echo "=== BioOps SubmitMaster local smoke test ==="
+            echo ""
+            echo "This WorkflowTemplate is only a smoke test."
+            echo "It does not run Config Creator yet."
+            echo "It does not run SubmitMaster yet."
+            echo ""
+            echo "Received parameters:"
+            echo "batch_id={{workflow.parameters.batch_id}}"
+            echo "batch_date_id={{workflow.parameters.batch_date_id}}"
+            echo "samples_ids_str={{workflow.parameters.samples_ids_str}}"
+            echo "stage={{workflow.parameters.stage}}"
+            echo "mode={{workflow.parameters.mode}}"
+            echo "seq_type={{workflow.parameters.seq_type}}"
+            echo "cluster_name={{workflow.parameters.cluster_name}}"
+            echo "mongo_cluster_name={{workflow.parameters.mongo_cluster_name}}"
+            echo "namespace={{workflow.parameters.namespace}}"
+            echo ""
+            echo "SUCCESS: Argo UI parameter submission works."
