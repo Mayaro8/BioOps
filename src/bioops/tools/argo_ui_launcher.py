@@ -19,9 +19,8 @@ class ArgoUiLauncher:
     """
     Opens the local Argo Workflows UI.
 
-    This does not submit workflows.
-    It only takes the user to the Argo UI where they can submit
-    the SubmitMaster WorkflowTemplate and fill parameters manually.
+    This tool starts a kubectl port-forward to the Argo server and then tries
+    to open the UI URL. It does not submit workflows directly.
     """
 
     def __init__(
@@ -40,30 +39,54 @@ class ArgoUiLauncher:
         self.url = url or f"https://localhost:{local_port}"
         self.workflow_template_name = workflow_template_name
 
-    def launch(self, start_port_forward: bool = False) -> ArgoUiLaunchResult:
+    def launch(self, start_port_forward: bool = True) -> ArgoUiLaunchResult:
         port_forward_started = False
 
-        if start_port_forward and not self._is_port_open("127.0.0.1", self.local_port):
-            self._start_port_forward()
-            port_forward_started = True
-            time.sleep(2)
+        if start_port_forward:
+            if self._is_port_open("127.0.0.1", self.local_port):
+                port_status = (
+                    f"Port {self.local_port} is already open, so I reused the "
+                    "existing Argo UI tunnel."
+                )
+            else:
+                self._start_port_forward()
+                port_forward_started = True
+                time.sleep(2)
+
+                if self._is_port_open("127.0.0.1", self.local_port):
+                    port_status = (
+                        f"Started Argo UI port-forward on port {self.local_port}."
+                    )
+                else:
+                    port_status = (
+                        "Tried to start Argo UI port-forward, but the port did "
+                        "not become reachable yet. Check Kubernetes/Argo status."
+                    )
+        else:
+            port_status = "Port-forward was not requested."
 
         opened = webbrowser.open(self.url)
 
         message = (
             "Opening Argo UI for SubmitMaster.\n\n"
+            f"{port_status}\n\n"
             f"URL: {self.url}\n\n"
             "In Argo UI, open:\n"
             f"Workflow Templates → {self.workflow_template_name} → Submit\n\n"
-            "Fill the parameters and click Submit.\n"
+            "The workflow template now runs the local SubmitMaster MVP:\n"
+            "Config Creator → generated JSON → SubmitMaster → downstream workflows.\n"
         )
 
-        if not start_port_forward:
+        if not opened:
             message += (
-                "\nIf the UI is not reachable, run:\n"
-                f"kubectl -n {self.namespace} port-forward "
-                f"service/{self.service_name} {self.local_port}:{self.remote_port}\n"
+                "\nI could not automatically open a browser from this environment.\n"
+                f"Open this URL manually: {self.url}\n"
             )
+
+        message += (
+            "\nIf you are using VS Code Remote/SSH, make sure port "
+            f"{self.local_port} is forwarded to your laptop."
+        )
 
         return ArgoUiLaunchResult(
             opened=opened,

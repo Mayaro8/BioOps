@@ -8,18 +8,16 @@ import yaml
 from bioops.agents.base import BaseAgent
 from bioops.tools.argo_ui_launcher import ArgoUiLauncher
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 AGENTS_CONFIG_PATH = PROJECT_ROOT / "configs" / "agents.yaml"
 
 
 class SubmitMasterAgent(BaseAgent):
     """
-    Simple SubmitMaster UI-launch agent.
+    SubmitMaster launcher agent.
 
-    This agent does not build SubmitMaster JSON.
-    This agent does not collect pipeline parameters.
-    It opens the Argo UI so the user can submit the real SubmitMaster workflow.
+    This agent opens the Argo UI for the local SubmitMaster WorkflowTemplate.
+    By default, it also starts the Argo port-forward so the UI is reachable.
     """
 
     name = "submit_master"
@@ -45,24 +43,24 @@ class SubmitMasterAgent(BaseAgent):
     def run(self, message: str) -> str:
         lowered = message.lower()
 
-        if (
-            "launch submit master" not in lowered
-            and "open submit master" not in lowered
-            and "submit master ui" not in lowered
-        ):
-            return (
-                "Use: launch submit master\n\n"
-                "This opens the Argo UI. From there, submit the "
-                "`bioops-submit-master-local` WorkflowTemplate."
-            )
-
-        start_port_forward = (
-            "port-forward" in lowered
-            or "port forward" in lowered
-            or "--port-forward" in lowered
+        valid_request = (
+            "launch submit master" in lowered
+            or "open submit master" in lowered
+            or "submit master ui" in lowered
+            or "open argo" in lowered
+            or "argo ui" in lowered
         )
 
-        result = self.launcher.launch(start_port_forward=start_port_forward)
+        if not valid_request:
+            return (
+                "Use: launch submit master\n\n"
+                "This starts the Argo UI port-forward and opens the "
+                "`bioops-submit-master-local` WorkflowTemplate page."
+            )
+
+        # New behavior:
+        # Always start/check the Argo UI port-forward when launching SubmitMaster.
+        result = self.launcher.launch(start_port_forward=True)
         return result.message
 
     def _load_config(self, path: Path) -> dict[str, Any]:
