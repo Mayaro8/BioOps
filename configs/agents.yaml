@@ -27,10 +27,10 @@ agents:
       issues, and missing tests.
   submit_master:
     enabled: true
-    description: Opens Argo UI for launching the local SubmitMaster workflow.
-    argo_namespace: argo
+    description: Opens company Argo UI for launching the SubmitMaster workflow.
+    argo_namespace: bioops-dev
     argo_service_name: argo-server
     argo_local_port: 2746
     argo_remote_port: 2746
-    argo_ui_url: https://localhost:2746
+    argo_ui_url: https://158.160.184.15:2746
     argo_workflow_template: bioops-submit-master-local
