@@ -1,0 +1,24 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: bioops-api
+  namespace: bioops-dev
+spec:
+  rules:
+    - host: bioops-demo.example.com
+      http:
+        paths:
+          - path: /bitrix/message
+            pathType: Prefix
+            backend:
+              service:
+                name: bioops-api
+                port:
+                  number: 8000
+          - path: /health
+            pathType: Prefix
+            backend:
+              service:
+                name: bioops-api
+                port:
+                  number: 8000

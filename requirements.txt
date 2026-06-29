@@ -13,6 +13,5 @@ pypdf
 typing-extensions
 fastapi
 uvicorn
-requestsfastapi
-uvicorn[standard]
 requests
+uvicorn[standard]
