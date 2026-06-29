@@ -15,3 +15,5 @@ fastapi
 uvicorn
 requests
 uvicorn[standard]
+pandas
+awscli
