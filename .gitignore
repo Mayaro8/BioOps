@@ -217,3 +217,14 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 src/bioops/agents/chatgpt.ipynbsrc/bioops/agents/chatgpt.ipynb
+
+# Local secrets
+.env
+k8s/bioops-api/secret.yaml
+
+# Python/local artifacts
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+k8s/bioops-api/secret.yaml
