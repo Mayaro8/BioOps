@@ -1,0 +1,72 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: bioops-submit-master-local
+  namespace: argo
+spec:
+  serviceAccountName: bioops-submit-master
+  entrypoint: config-creator-then-submit-master
+
+  volumes:
+    - name: pipeline-v3
+      persistentVolumeClaim:
+        claimName: bioops-pipeline-v3-pvc
+
+  templates:
+    - name: config-creator-then-submit-master
+      dag:
+        tasks:
+          - name: config-creator
+            template: run-config-creator
+
+          - name: submit-master
+            dependencies:
+              - config-creator
+            template: run-submit-master
+
+    - name: run-config-creator
+      container:
+        image: bioops-config-creator:local
+        imagePullPolicy: IfNotPresent
+        command:
+          - bash
+          - -lc
+        args:
+          - |
+            set -eux
+            echo "=== Config Creator image is running ==="
+            pwd
+            ls -la /app
+
+            mkdir -p /mnt/pipeline-v3.0/generated
+
+            echo '{"status":"fake config created by config-creator step"}' > /mnt/pipeline-v3.0/generated/submit-master-config.json
+
+            echo "Config file written:"
+            cat /mnt/pipeline-v3.0/generated/submit-master-config.json
+        volumeMounts:
+          - name: pipeline-v3
+            mountPath: /mnt/pipeline-v3.0
+
+    - name: run-submit-master
+      container:
+        image: bioops-submit-master:local
+        imagePullPolicy: IfNotPresent
+        command:
+          - bash
+          - -lc
+        args:
+          - |
+            set -eux
+            echo "=== SubmitMaster image is running ==="
+            pwd
+            ls -la /app
+
+            echo "Reading config from PVC:"
+            cat /mnt/pipeline-v3.0/generated/submit-master-config.json
+
+            echo "Checking Argo CLI:"
+            argo version --short
+        volumeMounts:
+          - name: pipeline-v3
+            mountPath: /mnt/pipeline-v3.0
