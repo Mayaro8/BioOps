@@ -10,7 +10,7 @@ from bioops.agents.knowledge_agent import KnowledgeAgent
 from bioops.agents.review_agent import ReviewAgent
 from bioops.agents.submit_master_agent import SubmitMasterAgent
 from bioops.tools.llm_router import LLMRouterTool
-
+from bioops.agents.batch_status_agent import BatchStatusAgent
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 AGENTS_CONFIG_PATH = PROJECT_ROOT / "configs" / "agents.yaml"
@@ -21,6 +21,7 @@ SUPPORTED_AGENTS = {
     "cluster_health",
     "review",
     "submit_master",
+    "batch_status",
 }
 MANDATORY_AGENTS = {"general"}
 ROUTING_ERROR = "routing_error"
@@ -37,6 +38,8 @@ knowledge_agent: KnowledgeAgent | None = None
 review_agent: ReviewAgent | None = None
 cluster_health_agent: ClusterHealthAgent | None = None
 submit_master_agent: SubmitMasterAgent | None = None
+batch_status_agent: BatchStatusAgent | None = None
+
 
 _llm_router_tool: LLMRouterTool | None = None
 llm_router_tool: Any | None = None
@@ -109,6 +112,7 @@ def reset_orchestrator_cache() -> None:
     global llm_router_tool
     global _active_enabled_agent_names
     global graph
+    global batch_status_agent
 
     general_agent = None
     knowledge_agent = None
@@ -119,7 +123,7 @@ def reset_orchestrator_cache() -> None:
     llm_router_tool = None
     _active_enabled_agent_names = None
     graph = None
-
+    batch_status_agent = None
 
 def get_general_agent() -> GeneralAgent:
     global general_agent
@@ -186,6 +190,11 @@ def router_node(state: BioOpsState) -> dict:
 
     return {"selected_agent": selected_agent, "response": ""}
 
+def get_batch_status_agent() -> BatchStatusAgent:
+    global batch_status_agent
+    if batch_status_agent is None:
+        batch_status_agent = BatchStatusAgent()
+    return batch_status_agent
 
 def route_after_router(state: BioOpsState) -> str:
     selected_agent = state.get("selected_agent", ROUTING_ERROR)
@@ -196,6 +205,9 @@ def route_after_router(state: BioOpsState) -> str:
 
 def general_node(state: BioOpsState) -> dict:
     return {"response": get_general_agent().run(state["message"])}
+
+def batch_status_node(state: BioOpsState) -> dict:
+    return {"response": get_batch_status_agent().run(state["message"])}
 
 
 def knowledge_node(state: BioOpsState) -> dict:
@@ -247,6 +259,7 @@ def build_graph():
         "cluster_health": cluster_health_node,
         "review": review_node,
         "submit_master": submit_master_node,
+        "batch_status": batch_status_node,
     }
 
     graph_builder.add_node("router", router_node)
