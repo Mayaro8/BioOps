@@ -326,3 +326,11 @@ docker compose run --rm bioops python -m bioops.rag.ingest
 docker compose run --rm bioops python -m pytest
 docker compose run --rm bioops python -m bioops.main
 ```
+
+## 11. What are the different functionalities of the submit master agent
+
+First it would launch the Argo UI taking the bioinformatician into the submit master, completing D1. For D2, the agent launches Config Creator, a package already developed that creates config for the submit master. For D3-D4, it send a Bitrix24 report to the user. For D5, it restarts the pod. 
+
+To test the functionality, the agent must be deployed onto K8s and then accessed through Bitrix 24, after that a command through Bitrix24, will connect to Argo and read or perform the action. For now, it is manually launched on Argo and the messages it send are checked through Bitrix24. 
+
+After deploying the image of the agent on K8s, I would need to do some more tests to check how it works.
