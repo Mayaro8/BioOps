@@ -39,6 +39,8 @@ class GitHubRequest:
     head: str | None = None
     path: str | None = None
     error: str | None = None
+    path: str | None = None
+    error: str | None = None
 
 
 @dataclass

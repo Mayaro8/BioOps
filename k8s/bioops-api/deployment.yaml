@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bioops-api
+  namespace: bioops-dev
+  labels:
+    app: bioops-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bioops-api
+  template:
+    metadata:
+      labels:
+        app: bioops-api
+    spec:
+      containers:
+        - name: bioops-api
+          image: cr.yandex/crp5l1da4kinv8ofomr5/fastmri-students/bioops:bitrix-api-v1
+          imagePullPolicy: Always
+          command: ["python", "-m", "uvicorn"]
+          args:
+            - bioops.api.bitrix_app:app
+            - --host
+            - 0.0.0.0
+            - --port
+            - "8000"
+          ports:
+            - containerPort: 8000
+          env:
+            - name: BITRIX_WEBHOOK_URL
+              valueFrom:
+                secretKeyRef:
+                  name: bioops-api-secrets
+                  key: BITRIX_WEBHOOK_URL
+            - name: BITRIX_DIALOG_ID
+              valueFrom:
+                secretKeyRef:
+                  name: bioops-api-secrets
+                  key: BITRIX_DIALOG_ID
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 20

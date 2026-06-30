@@ -11,3 +11,9 @@ PyGithub
 pytest
 pypdf
 typing-extensions
+fastapi
+uvicorn
+requests
+uvicorn[standard]
+pandas
+awscli

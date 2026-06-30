@@ -7,7 +7,6 @@ services:
       - "6334:6334"
     volumes:
       - qdrant_storage:/qdrant/storage
-
   bioops:
     build:
       context: .
@@ -20,10 +19,12 @@ services:
       - PYTHONPATH=/app/src
       - QDRANT_URL=http://localhost:6333
       - QDRANT_COLLECTION=bioops_knowledge
+      - KUBECONFIG=/root/.kube/config
     volumes:
       - .:/app
       - ~/.kube:/root/.kube:ro
       - ~/.minikube:/root/.minikube:ro
+      - ~/.minikube:/home/mayar/.minikube:ro
     depends_on:
       - qdrant
     stdin_open: true

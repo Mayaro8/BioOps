@@ -1,0 +1,165 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: bioops-dev
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: bioops
+  namespace: bioops-dev
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bioops-config
+  namespace: bioops-dev
+data:
+  BIOOPS_ENV: "kubernetes"
+  BIOOPS_NAMESPACE: "bioops-dev"
+  ARGO_NAMESPACE: "bioops-dev"
+  ARGO_UI_URL: "https://158.160.184.15:2746"
+  QDRANT_URL: "http://qdrant.bioops-dev.svc.cluster.local:6333"
+  PYTHONUNBUFFERED: "1"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qdrant
+  namespace: bioops-dev
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: qdrant
+  template:
+    metadata:
+      labels:
+        app: qdrant
+    spec:
+      nodeSelector:
+        genoteknodetype: fastmri-cpu
+      tolerations:
+        - key: yandex.cloud/preemptible
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
+      containers:
+        - name: qdrant
+          image: qdrant/qdrant:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 6333
+            - name: grpc
+              containerPort: 6334
+          volumeMounts:
+            - name: qdrant-storage
+              mountPath: /qdrant/storage
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1"
+              memory: "2Gi"
+      volumes:
+        - name: qdrant-storage
+          emptyDir: {}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: qdrant
+  namespace: bioops-dev
+spec:
+  selector:
+    app: qdrant
+  ports:
+    - name: http
+      port: 6333
+      targetPort: 6333
+    - name: grpc
+      port: 6334
+      targetPort: 6334
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bioops
+  namespace: bioops-dev
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bioops
+  template:
+    metadata:
+      labels:
+        app: bioops
+    spec:
+      serviceAccountName: bioops
+
+      nodeSelector:
+        genoteknodetype: fastmri-cpu
+
+      tolerations:
+        - key: yandex.cloud/preemptible
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
+
+      containers:
+        - name: bioops
+          image: cr.yandex/crp5l1da4kinv8ofomr5/fastmri-students/bioops:9e8a09e
+          imagePullPolicy: Always
+
+          command: ["sleep", "infinity"]
+
+          envFrom:
+            - configMapRef:
+                name: bioops-config
+            - secretRef:
+                name: bioops-secrets
+
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1"
+              memory: "2Gi"
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: bioops-access
+  namespace: bioops-dev
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "events"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["argoproj.io"]
+    resources: ["workflows", "workflowtemplates"]
+    verbs: ["get", "list", "watch", "create"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: bioops-access
+  namespace: bioops-dev
+subjects:
+  - kind: ServiceAccount
+    name: bioops
+    namespace: bioops-dev
+roleRef:
+  kind: Role
+  name: bioops-access
+  apiGroup: rbac.authorization.k8s.io

@@ -1,0 +1,118 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: haplotypecaller-gvcf2vcf-full-multiple-tubes
+  namespace: argo
+spec:
+  entrypoint: echo-haplotypecaller
+
+  arguments:
+    parameters:
+      - name: SAMPLE_IDS
+        value: "[]"
+      - name: BATCH_ID
+        value: batch140325
+      - name: INPUT_DIR_S3
+        value: s3://local-mock/input
+      - name: OUTPUT_DIR_S3
+        value: s3://local-mock/output
+      - name: PLOIDY_DIR_S3
+        value: s3://local-mock/ploidy
+      - name: BASENAME_CALLED_VCF
+        value: called
+      - name: ASSEMBLY
+        value: hg19
+      - name: RECALIBRATED
+        value: "no"
+      - name: CPUS_haplotypecaller
+        value: "5"
+      - name: RAM
+        value: "20"
+      - name: CPUS_gvcf2vcf
+        value: "10"
+      - name: CHROMOSOMES_IN_PARALLEL
+        value: "5"
+      - name: BAM_SUFFIX
+        value: markdup
+      - name: DBSNP_VCF
+        value: s3://local-mock/dbsnp.vcf
+      - name: DBSNP
+        value: s3://local-mock/dbsnp
+      - name: REF
+        value: s3://local-mock/ref.fa
+      - name: REGIONS_WITHOUT_HOMOPOLYMERS
+        value: s3://local-mock/regions.bed
+
+  templates:
+    - name: echo-haplotypecaller
+      container:
+        image: alpine:3.20
+        command: [sh, -c]
+        args:
+          - |
+            echo "=== Downstream stub: haplotypecaller-gvcf2vcf-full-multiple-tubes ==="
+            echo "This is an echo WorkflowTemplate."
+            echo "Real HaplotypeCaller is NOT running yet."
+            echo ""
+            echo "Received parameters from SubmitMaster:"
+            echo "SAMPLE_IDS={{workflow.parameters.SAMPLE_IDS}}"
+            echo "BATCH_ID={{workflow.parameters.BATCH_ID}}"
+            echo "INPUT_DIR_S3={{workflow.parameters.INPUT_DIR_S3}}"
+            echo "OUTPUT_DIR_S3={{workflow.parameters.OUTPUT_DIR_S3}}"
+            echo "PLOIDY_DIR_S3={{workflow.parameters.PLOIDY_DIR_S3}}"
+            echo "BASENAME_CALLED_VCF={{workflow.parameters.BASENAME_CALLED_VCF}}"
+            echo "ASSEMBLY={{workflow.parameters.ASSEMBLY}}"
+            echo "RECALIBRATED={{workflow.parameters.RECALIBRATED}}"
+            echo "CPUS_haplotypecaller={{workflow.parameters.CPUS_haplotypecaller}}"
+            echo "RAM={{workflow.parameters.RAM}}"
+            echo "CPUS_gvcf2vcf={{workflow.parameters.CPUS_gvcf2vcf}}"
+            echo "CHROMOSOMES_IN_PARALLEL={{workflow.parameters.CHROMOSOMES_IN_PARALLEL}}"
+            echo "BAM_SUFFIX={{workflow.parameters.BAM_SUFFIX}}"
+            echo "DBSNP_VCF={{workflow.parameters.DBSNP_VCF}}"
+            echo "DBSNP={{workflow.parameters.DBSNP}}"
+            echo "REF={{workflow.parameters.REF}}"
+            echo "REGIONS_WITHOUT_HOMOPOLYMERS={{workflow.parameters.REGIONS_WITHOUT_HOMOPOLYMERS}}"
+            echo ""
+            echo "SUCCESS: SubmitMaster reached the HaplotypeCaller downstream template."
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: transfer-vcf-s3-dev
+  namespace: argo
+spec:
+  entrypoint: echo-transfer-vcf
+
+  arguments:
+    parameters:
+      - name: SAMPLE_IDS
+        value: sample1,sample2
+      - name: BATCH_ID
+        value: batch140325
+      - name: DEST_ENV
+        value: dev
+      - name: TELEGRAM_BOT_TOKEN
+        value: dummy-token
+      - name: TELEGRAM_CHAT_ID
+        value: dummy-chat
+
+  templates:
+    - name: echo-transfer-vcf
+      container:
+        image: alpine:3.20
+        command: [sh, -c]
+        args:
+          - |
+            echo "=== Downstream stub: transfer-vcf-s3-dev ==="
+            echo "This is an echo WorkflowTemplate."
+            echo "Real VCF transfer is NOT running yet."
+            echo ""
+            echo "Received parameters from SubmitMaster:"
+            echo "SAMPLE_IDS={{workflow.parameters.SAMPLE_IDS}}"
+            echo "BATCH_ID={{workflow.parameters.BATCH_ID}}"
+            echo "DEST_ENV={{workflow.parameters.DEST_ENV}}"
+            echo "TELEGRAM_BOT_TOKEN={{workflow.parameters.TELEGRAM_BOT_TOKEN}}"
+            echo "TELEGRAM_CHAT_ID={{workflow.parameters.TELEGRAM_CHAT_ID}}"
+            echo ""
+            echo "SUCCESS: SubmitMaster reached the Transfer VCF downstream template."

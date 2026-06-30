@@ -1,6 +1,5 @@
 from bioops.agents.review_agent import ReviewAgent
 from bioops.tools.github_review_tool import GitHubChangedFile
-from bioops.tools.llm_review import LLMReviewError
 
 
 class FakeLLMReviewTool:
@@ -8,12 +7,6 @@ class FakeLLMReviewTool:
         assert "Patch text:" in prompt
         assert "src/bioops/test.py" in prompt
         return "1. Verdict: looks testable."
-
-
-
-class FailingLLMReviewTool:
-    def review_prompt(self, prompt: str) -> str:
-        raise LLMReviewError("LLM patch review could not be started: missing Azure config")
 
 
 def test_review_agent_adds_llm_patch_review_section():
@@ -62,32 +55,3 @@ def test_review_agent_handles_missing_patch_text():
     )
 
     assert "No patch text available" in patch_text
-
-
-def test_review_agent_returns_error_when_llm_patch_review_fails():
-    agent = ReviewAgent(llm_review_tool=FailingLLMReviewTool())
-
-    report = agent._format_changed_files_review(
-        title="GitHub PR Review Report",
-        status="ok",
-        repo="Mayaro8/BioOps",
-        subject="PR #1: test",
-        base="main",
-        head="feature/test",
-        author="tester",
-        changed_files=[
-            GitHubChangedFile(
-                filename="src/bioops/test.py",
-                status="modified",
-                additions=2,
-                deletions=1,
-                changes=3,
-                patch="@@" "\n+print('hello')",
-            )
-        ],
-    )
-
-    assert "Status: llm_review_error" in report
-    assert "Status: ok" not in report
-    assert "Patch-level LLM review failed." in report
-    assert "No successful PR/branch review was produced." in report

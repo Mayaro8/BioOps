@@ -10,7 +10,7 @@ from bioops.tools.github_review_tool import (
     GitHubRepoOverviewContext,
     GitHubReviewTool,
 )
-from bioops.tools.llm_review import LLMReviewError, LLMReviewTool
+from bioops.tools.llm_review import LLMReviewTool
 
 
 class ReviewAgent(BaseAgent):
@@ -405,29 +405,17 @@ class ReviewAgent(BaseAgent):
         remarks = self._detect_style_logic_remarks(changed_files)
         suggestions = self._detect_suggestions(changed_files)
 
-        try:
-            llm_review = self._run_llm_patch_review(
-                repo=repo,
-                subject=subject,
-                base=base,
-                head=head,
-                changed_files=changed_files,
-                issues=issues,
-                risks=risks,
-                remarks=remarks,
-                suggestions=suggestions,
-            )
-        except LLMReviewError as error:
-            return self._format_llm_patch_review_error(
-                title=title,
-                repo=repo,
-                subject=subject,
-                base=base,
-                head=head,
-                author=author,
-                changed_files=changed_files,
-                error=str(error),
-            )
+        llm_review = self._run_llm_patch_review(
+            repo=repo,
+            subject=subject,
+            base=base,
+            head=head,
+            changed_files=changed_files,
+            issues=issues,
+            risks=risks,
+            remarks=remarks,
+            suggestions=suggestions,
+        )
 
         lines: list[str] = []
 
@@ -503,7 +491,7 @@ class ReviewAgent(BaseAgent):
                 llm_review,
                 "",
                 "Review note:",
-                "- This is a read-only review using deterministic checks plus mandatory LLM patch analysis.",
+                "- This is a read-only review using deterministic checks plus optional LLM patch analysis.",
                 "- No GitHub comments were posted.",
                 "- No PR status was modified.",
             ]
@@ -546,51 +534,6 @@ class ReviewAgent(BaseAgent):
 
         return "\n---\n".join(patch_sections)
 
-
-    def _format_llm_patch_review_error(
-        self,
-        title: str,
-        repo: str | None,
-        subject: str,
-        base: str,
-        head: str,
-        author: str,
-        changed_files: list[GitHubChangedFile],
-        error: str,
-    ) -> str:
-        total_additions = sum(file.additions for file in changed_files)
-        total_deletions = sum(file.deletions for file in changed_files)
-
-        lines = [
-            title,
-            "",
-            "Status: llm_review_error",
-            f"Repository: {repo or 'not provided'}",
-            f"Subject: {subject}",
-        ]
-        if author:
-            lines.append(f"Author: {author}")
-
-        lines.extend(
-            [
-                f"Base branch: {base}",
-                f"Head branch: {head}",
-                "",
-                "Patch-level LLM review failed.",
-                f"Error: {error}",
-                "",
-                f"Changed files available: {len(changed_files)}",
-                f"Diff size: +{total_additions}/-{total_deletions}",
-                "",
-                "No successful PR/branch review was produced.",
-                "No GitHub comments were posted.",
-                "No PR status was modified.",
-            ]
-        )
-
-        return "\n".join(lines)
-
-
     def _run_llm_patch_review(
         self,
         repo: str | None,
@@ -604,9 +547,7 @@ class ReviewAgent(BaseAgent):
         suggestions: list[str],
     ) -> str:
         if not changed_files:
-            raise LLMReviewError(
-                "LLM patch review could not be started: no changed files were provided."
-            )
+            return "LLM patch review unavailable: no changed files were provided."
 
         patch_text = self._build_patch_text(changed_files)
 

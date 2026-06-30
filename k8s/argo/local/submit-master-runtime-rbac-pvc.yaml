@@ -1,0 +1,63 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: bioops-pipeline-v3-pvc
+  namespace: argo
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: bioops-submit-master
+  namespace: argo
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: bioops-submit-master
+  namespace: argo
+rules:
+  - apiGroups:
+      - argoproj.io
+    resources:
+      - workflows
+      - workflowtemplates
+      - workflowtaskresults
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - patch
+      - update
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+      - pods/log
+    verbs:
+      - get
+      - list
+      - watch
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: bioops-submit-master
+  namespace: argo
+subjects:
+  - kind: ServiceAccount
+    name: bioops-submit-master
+    namespace: argo
+roleRef:
+  kind: Role
+  name: bioops-submit-master
+  apiGroup: rbac.authorization.k8s.io

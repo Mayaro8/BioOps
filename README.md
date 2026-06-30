@@ -1,26 +1,24 @@
 # BioOps
 
-BioOps is a multi-agent assistant for bioinformatics operations, including knowledge retrieval, Kubernetes cluster health monitoring, pipeline status reporting, code review, and operational alerts.
+BioOps is a multi-agent assistant for bioinformatics operations, including knowledge retrieval, Kubernetes cluster health monitoring, pipeline status reporting, Submit Master operations, code review, and operational alerts.
 
 ## Documentation
 
+Detailed project documentation is available in `docs/`:
 
-Detailed project documentation is available in [`docs/`](docs/):
+- `docs/README.md` — full project overview.
+- `docs/DESIGN.md` — architecture and design notes.
+- `docs/assignment.md` — Russian assignment specification.
+- `docs/assignment.en.md` — English assignment specification.
 
-- [`docs/README.md`](docs/README.md) — full project overview
-- [`docs/DESIGN.md`](docs/DESIGN.md) — architecture and design notes
-- [`docs/assignment.md`](docs/assignment.md) — assignment specification
-- [`docs/assignment.en.md`](docs/assignment.en.md) — English assignment specification
+## Current agents include
 
-- [Internship assignment (English)](docs/assignment.en.md) — goals, requirements, architecture, stages, and acceptance criteria.
-- [Задание на практику (Russian)](docs/assignment.md) — Russian version of the document above.
+- Knowledge Agent — answers questions from indexed project documentation.
+- Cluster Health Agent — checks Kubernetes pod health, logs, running steps, cost, and ETA.
+- Review Agent — reviews local repositories, GitHub repositories, PRs, open PRs, and branch comparisons.
+- Submit Master Agent — prepares, launches, monitors, reports, and safely retries Submit Master workflows.
+- General fallback agent — handles greetings, unclear requests, and unsupported tasks.
 
-## Current agents include:
-
-* Knowledge Agent — answers questions from indexed project documentation.
-* Cluster Health Agent — checks Kubernetes pod health, logs, running steps, cost, and ETA.
-* Review Agent — reviews local repositories, GitHub repositories, PRs, open PRs, and branch comparisons.
-* General fallback agent - for when the Azure key doesn't come up with a suitable agent to relay the prompt to.
 ---
 
 ## 1. Requirements
@@ -29,27 +27,21 @@ Detailed project documentation is available in [`docs/`](docs/):
 Git
 Docker
 Docker Compose
-kubectl, only for Cluster Health Agent
-A running Kubernetes cluster, only for Cluster Health Agent
+kubectl, only for Cluster Health Agent and Submit Master Agent
+A running Kubernetes cluster, only for Cluster Health Agent and Submit Master Agent
+Argo Workflows, only for Submit Master Agent
 Azure OpenAI credentials, for Knowledge Agent, LLM router, and LLM review
 GitHub token, for GitHub Review Agent
-Bitrix24 webhook, optional for Health Monitor alerts
+Bitrix24 webhook, optional for Health Monitor alerts and Submit Master reports
 ```
 
 ---
 
-## 2. One-time setup for all agents
-
-Clone the repository:
+## 2. One-time setup
 
 ```bash
 git clone https://github.com/Mayaro8/BioOps.git
 cd BioOps
-```
-
-Create local environment file:
-
-```bash
 cp .env.example .env
 nano .env
 ```
@@ -73,47 +65,17 @@ BITRIX_WEBHOOK_URL=
 BITRIX_DIALOG_ID=
 ```
 
-For Bitrix24 alerts:
-
-```env
-ALERT_CHANNEL=bitrix
-BITRIX_WEBHOOK_URL=https://your-domain.bitrix24.com/rest/USER_ID/WEBHOOK_CODE
-BITRIX_DIALOG_ID=chat123
-```
-
 Do not commit `.env`.
 
 ---
 
 ## 3. Build and launch BioOps
 
-Build the BioOps container:
-
 ```bash
 docker compose build bioops
-```
-
-Start Qdrant for the Knowledge Agent:
-
-```bash
 docker compose up -d qdrant
-```
-
-Ingest documentation into Qdrant:
-
-```bash
 docker compose run --rm bioops python -m bioops.rag.ingest
-```
-
-Run tests:
-
-```bash
 docker compose run --rm bioops python -m pytest
-```
-
-Start the CLI:
-
-```bash
 docker compose run --rm bioops python -m bioops.main
 ```
 
@@ -122,9 +84,10 @@ Expected startup:
 ```text
 BioOps CLI started. Type 'exit' to quit.
 You:
-
-# Agent usage
 ```
+
+---
+
 ## 4. Knowledge Agent
 
 Purpose:
@@ -133,64 +96,12 @@ Purpose:
 Answer questions from indexed files in docs/.
 ```
 
-Required before use:
-
-```bash
-docker compose up -d qdrant
-docker compose run --rm bioops python -m bioops.rag.ingest
-docker compose run --rm bioops python -m bioops.main
-```
-
 Example prompts:
 
 ```text
 Explain pipeline-v3.0 steps.
-```
-
-Expected answer shape:
-
-```text
-pipeline-v3.0 includes the following documented steps:
-1. bam-to-gvcf
-2. gvcf-to-vcf
-...
-```
-
-```text
 What does bam to gvcf output?
-```
-
-Expected answer shape:
-
-```text
-bam-to-gvcf outputs a GVCF file.
-```
-
-```text
 Which step takes a gvcf file as input?
-```
-
-Expected answer shape:
-
-```text
-gvcf-to-vcf takes a GVCF file as input.
-```
-
-```text
-Based on the indexed documentation, what does gvcf to vcf do?
-```
-
-Expected answer shape:
-
-```text
-The indexed documentation says that gvcf-to-vcf converts GVCF input into VCF output.
-```
-
-Troubleshooting:
-
-```text
-If answers are empty or generic, rerun ingestion.
-If Qdrant is unreachable, check docker compose ps.
 ```
 
 ---
@@ -203,181 +114,14 @@ Purpose:
 Read-only code review for local repos, GitHub repos, PRs, open PRs, and branch comparisons.
 ```
 
-Required for GitHub review:
-
-```env
-GITHUB_TOKEN=your_github_token
-```
-
-Required for LLM patch review:
-
-```env
-AZURE_OPENAI_ENDPOINT=...
-AZURE_OPENAI_API_KEY=...
-AZURE_OPENAI_API_VERSION=...
-AZURE_OPENAI_CHAT_DEPLOYMENT=...
-```
-
-Start CLI:
-
-```bash
-docker compose run --rm bioops python -m bioops.main
-```
-
-### Case 1 — local repository review
-
-Prompt:
+Example prompts:
 
 ```text
 Review path=/app
-```
-
-Expected answer shape:
-
-```text
-Local Repository Review Report
-
-Status: ok
-Path: /app
-
-Changed files:
-- ...
-
-Found issues:
-- ...
-
-Risks:
-- ...
-
-Suggestions:
-- Run pytest.
-- Add tests for changed agent/tool behavior.
-```
-
-### Case 2 — GitHub repository overview
-
-Prompt:
-
-```text
 Review repo=Mayaro8/BioOps
-```
-
-Expected answer shape:
-
-```text
-GitHub Repository Review Report
-
-Repository: Mayaro8/BioOps
-Status: ok
-
-Repository structure:
-- README found
-- src/bioops found
-- tests found
-- Dockerfile found
-
-Risks:
-- ...
-Suggestions:
-- ...
-```
-
-### Case 3 — list open pull requests
-
-Prompt:
-
-```text
 Check open PRs repo=Mayaro8/BioOps
-```
-
-Expected answer shape:
-
-```text
-Open Pull Requests Report
-
-Repository: Mayaro8/BioOps
-
-Open PRs:
-- PR #1: title
-  base: main
-  head: feature/example
-  changed files: N
-  diff size: +A/-D
-```
-
-### Case 4 — review one pull request
-
-Prompt:
-
-```text
 Review repo=Mayaro8/BioOps pr=1
-```
-
-or:
-
-```text
-Review https://github.com/Mayaro8/BioOps/pull/1
-```
-
-Expected answer shape:
-
-```text
-GitHub PR Review Report
-
-Repository: Mayaro8/BioOps
-Subject: PR #1: title
-Base branch: main
-Head branch: feature/example
-
-Changed files:
-- src/example.py [modified, +10/-2]
-
-Found issues:
-- ...
-
-Risks:
-- ...
-
-Suggestions:
-- ...
-
-LLM patch review:
-1. Verdict: ...
-2. Top issues: ...
-3. Risks: ...
-4. Next steps: ...
-
-Review note:
-- No GitHub comments were posted.
-- No PR status was modified.
-```
-
-### Case 5 — branch comparison
-
-Prompt:
-
-```text
 Review repo=Mayaro8/BioOps base=main head=feature/example
-```
-
-Expected answer shape:
-
-```text
-GitHub Branch Comparison Review
-
-Repository: Mayaro8/BioOps
-Base branch: main
-Head branch: feature/example
-
-Commits ahead: N
-Commits behind: N
-Changed files: N
-
-Risks:
-- ...
-
-LLM patch review:
-...
 ```
 
 Safety:
@@ -400,100 +144,14 @@ Purpose:
 Check Kubernetes pod health, running pipeline steps, unhealthy pods, logs, cost, and ETA.
 ```
 
-The Docker image does not create a Kubernetes cluster. Use an existing cluster, Minikube, or Kind.
-
-For local Minikube testing:
-
-```bash
-minikube start
-kubectl get nodes
-kubectl create namespace bioops
-```
-
-Create test pods:
-
-```bash
-kubectl run bam-to-gvcf-worker \
-  --image=busybox \
-  --namespace=bioops \
-  --labels=pipeline_step=bam-to-gvcf \
-  --command -- sleep 3600
-```
-
-```bash
-kubectl run gvcf-to-vcf-worker \
-  --image=busybox \
-  --namespace=bioops \
-  --labels=pipeline_step=gvcf-to-vcf \
-  --command -- sh -c "echo failed gvcf-to-vcf; exit 1"
-```
-
-Check pods:
-
-```bash
-kubectl get pods -n bioops
-```
-
-Start CLI:
-
-```bash
-docker compose run --rm bioops python -m bioops.main
-```
-
-### Prompt examples
-
-Prompt:
+Example prompts:
 
 ```text
 Check Kubernetes cluster health.
-```
-
-Expected answer shape:
-
-```text
-Cluster Health Report
-
-Total pods: 2
-Running pods: 1
-Unhealthy / waiting pods: 1
-
-Currently running pipeline steps:
-- bam-to-gvcf: bam-to-gvcf-worker [Running, runtime: ...]
-
-All observed pod statuses:
-- bam-to-gvcf: bam-to-gvcf-worker [Running, runtime: ...]
-- gvcf-to-vcf: gvcf-to-vcf-worker [Failed, runtime: ...]
-
-Errors:
-- gvcf-to-vcf-worker is in phase Failed.
-- gvcf-to-vcf-worker log error: failed gvcf-to-vcf
-
-Cost:
-- Estimated cost: ...
-
-ETA:
-- ...
-```
-
-Prompt:
-
-```text
 Are any pods failing?
-```
-
-```text
 Which pipeline steps are running?
-```
-
-```text
 Show recent Kubernetes errors.
-```
-
-```text
 What is the ETA for the running pipeline?
-```
-
-```text
 How much is the current cluster run costing?
 ```
 
@@ -503,7 +161,7 @@ Note:
 The Cluster Health Agent is read-only.
 It reports pod health and errors.
 It does not restart pods.
-Restarting failed pods belongs to the Submit Master Agent and should require confirmation.
+Submit Master retry belongs to the Submit Master Agent and D5 job.
 ```
 
 ---
@@ -533,9 +191,7 @@ AlertTool
 console or Bitrix24
 ```
 
-### Configure Bitrix24
-
-In `.env`:
+Bitrix configuration:
 
 ```env
 ALERT_CHANNEL=bitrix
@@ -543,156 +199,127 @@ BITRIX_WEBHOOK_URL=https://your-domain.bitrix24.com/rest/USER_ID/WEBHOOK_CODE
 BITRIX_DIALOG_ID=chat123
 ```
 
-For console-only testing:
-
-```env
-ALERT_CHANNEL=console
-```
-
-### Test Bitrix directly
-
-```bash
-docker compose run --rm bioops python - <<'PY'
-from bioops.tools.bitrix_tool import BitrixTool
-
-result = BitrixTool().send_message("BioOps Bitrix24 direct test message")
-print(result)
-PY
-```
-
-Expected result:
-
-```text
-BitrixSendResult(ok=True, message='Bitrix message sent successfully.', status_code=200)
-```
-
-### Test AlertTool through Bitrix
-
-```bash
-docker compose run --rm bioops python - <<'PY'
-from bioops.tools.alert_tool import AlertTool
-
-result = AlertTool().send_status(
-    title="Bitrix test",
-    message="BioOps AlertTool test message"
-)
-
-print(result)
-PY
-```
-
-Expected Bitrix message:
-
-```text
-[BIOOPS STATUS] Bitrix test
-Severity: info
-Time: ...
-
-BioOps AlertTool test message
-```
-
-### Run Health Monitor manually
+Run manually:
 
 ```bash
 docker compose run --rm bioops python -m bioops.jobs.cluster_health_monitor
 ```
 
-or:
+---
 
-```bash
-bash scripts/run_cluster_health_monitor.sh
-```
+## 8. Submit Master Agent
 
-Expected alert case:
+Purpose:
 
 ```text
-[BIOOPS ALERT] Cluster issue detected
-Severity: warning
-Time: ...
-
-Cluster Health Report
-
-Total pods: 2
-Running pods: 0
-Unhealthy / waiting pods: 2
-
-Errors:
-- ...
+Prepare, launch, monitor, report, and safely retry Submit Master workflows through BioOps.
 ```
 
-Expected running-status case:
+The Submit Master Agent covers Epic D:
 
 ```text
-[BIOOPS STATUS] Pipeline is running
-Severity: info
-Time: ...
-
-Cluster Health Report
-
-Running pods: 1
-Currently running pipeline steps:
-- ...
+D1 — generate original-compatible Submit Master configuration.
+D2 — prepare and launch Submit Master through Argo.
+D3 — monitor Submit Master workflow status, progress, errors, logs, runtime, cost, and ETA where available.
+D4 — report failed Submit Master workflow pods/nodes to Bitrix24.
+D5 — safely retry failed Submit Master workflows with retry limits and safety checks.
 ```
 
-Expected healthy-status case:
+Useful files:
 
 ```text
-[BIOOPS STATUS] Cluster health OK
-Severity: info
-Time: ...
-
-Cluster Health Report
-...
+src/bioops/agents/submit_master_agent.py
+src/bioops/tools/argo_ui_launcher.py
+src/bioops/tools/argo_workflow_monitor.py
+src/bioops/jobs/submit_master_d3_bitrix_report.py
+src/bioops/jobs/submit_master_d4_failure_bitrix_report.py
+src/bioops/jobs/submit_master_d5_retry_bitrix_report.py
+k8s/argo/local/bioops-submit-master-local.yaml
+k8s/argo/real/bioops-submit-master-real.yaml
+k8s/argo/company/bioops-submit-master-company.yaml
 ```
 
-### Run every 3 hours
-
-Edit cron:
-
-```bash
-crontab -e
-```
-
-Add:
-
-```cron
-0 */3 * * * cd /path/to/bio-ops && bash scripts/run_cluster_health_monitor.sh >> logs/cluster_health_monitor.log 2>&1
-```
-
-This runs the health monitor every 3 hours and writes output to:
+Example prompts:
 
 ```text
-logs/cluster_health_monitor.log
+Launch Submit Master.
+Open Submit Master in Argo.
+Show Submit Master progress.
+Report failed Submit Master pods to Bitrix.
+Retry failed Submit Master workflows safely.
 ```
 
-Without Bitrix24:
+Safety:
 
 ```text
-The monitor still runs.
-The report is printed to console/logs.
-No Bitrix message is sent.
-The monitor should not crash because Bitrix is missing.
-```
-
-
-## 9. Cleanup test Kubernetes pods
-
-```bash
-kubectl delete pod bam-to-gvcf-worker -n bioops
-kubectl delete pod gvcf-to-vcf-worker -n bioops
+Submit Master retry is guarded.
+Known deterministic/configuration failures should not be retried automatically.
+Retries are capped.
+Resubmitted workflows are annotated with retry metadata.
+Active retries should not be duplicated.
 ```
 
 ---
 
-## 10. Minimal full demo sequence
+## 9. BioOps API and Bitrix24 Kubernetes mode
+
+Purpose:
+
+```text
+Run BioOps as a Kubernetes API service that can receive Bitrix24 messages and send responses back to Bitrix24.
+```
+
+Useful files:
+
+```text
+src/bioops/api/bitrix_app.py
+k8s/bioops-api/deployment.yaml
+k8s/bioops-api/service.yaml
+k8s/bioops-api/ingress.yaml
+k8s/bioops-dev.yaml
+k8s/bioops-argo-rbac.yaml
+```
+
+Required Kubernetes secret:
+
+```bash
+kubectl create secret generic bioops-api-secrets \
+  -n bioops-dev \
+  --from-literal=BITRIX_WEBHOOK_URL='https://your-domain.bitrix24.com/rest/USER_ID/WEBHOOK_CODE' \
+  --from-literal=BITRIX_DIALOG_ID='chat123'
+```
+
+Apply manifests:
+
+```bash
+kubectl apply -f k8s/bioops-api/deployment.yaml
+kubectl apply -f k8s/bioops-api/service.yaml
+kubectl apply -f k8s/bioops-api/ingress.yaml
+```
+
+Health check:
+
+```bash
+curl https://YOUR_HOST/health
+```
+
+Bitrix message test:
+
+```bash
+curl -X POST https://YOUR_HOST/bitrix/message \
+  -H 'Content-Type: application/json' \
+  -d '{"message":"hello from Bitrix","dialog_id":"chat123"}'
+```
+
+---
+
+## 10. Minimal demo sequence
 
 ```bash
 git clone https://github.com/Mayaro8/BioOps.git
 cd BioOps
-
 cp .env.example .env
 nano .env
-
 docker compose build bioops
 docker compose up -d qdrant
 docker compose run --rm bioops python -m bioops.rag.ingest
@@ -700,23 +327,10 @@ docker compose run --rm bioops python -m pytest
 docker compose run --rm bioops python -m bioops.main
 ```
 
-For Cluster Health / Bitrix demo:
+## 11. What are the different functionalities of the submit master agent
 
-```bash
-minikube start
-kubectl create namespace bioops
+First it would launch the Argo UI taking the bioinformatician into the submit master, completing D1. For D2, the agent launches Config Creator, a package already developed that creates config for the submit master. For D3-D4, it send a Bitrix24 report to the user. For D5, it restarts the pod. 
 
-kubectl run bam-to-gvcf-worker \
-  --image=busybox \
-  --namespace=bioops \
-  --labels=pipeline_step=bam-to-gvcf \
-  --command -- sleep 3600
+To test the functionality, the agent must be deployed onto K8s and then accessed through Bitrix 24, after that a command through Bitrix24, will connect to Argo and read or perform the action. For now, it is manually launched on Argo and the messages it send are checked through Bitrix24. 
 
-kubectl run gvcf-to-vcf-worker \
-  --image=busybox \
-  --namespace=bioops \
-  --labels=pipeline_step=gvcf-to-vcf \
-  --command -- sh -c "echo failed gvcf-to-vcf; exit 1"
-
-docker compose run --rm bioops python -m bioops.jobs.cluster_health_monitor
-```
+After deploying the image of the agent on K8s, I would need to do some more tests to check how it works.
