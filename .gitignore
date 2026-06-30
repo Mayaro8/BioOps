@@ -229,3 +229,5 @@ k8s/argo/company/
 # Recovery/generated archives
 *.zip
 *.bak
+__pycache__/
+*.pyc
