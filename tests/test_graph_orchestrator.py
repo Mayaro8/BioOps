@@ -20,6 +20,10 @@ class FailingRouter:
         raise RuntimeError("router unavailable")
 
 
+def setup_function():
+    go.reset_orchestrator_cache()
+
+
 def test_router_uses_llm_selected_general(monkeypatch):
     monkeypatch.setattr(go, "llm_router_tool", FakeRouter("general"))
 
@@ -46,6 +50,20 @@ def test_router_uses_llm_selected_knowledge(monkeypatch):
     )
 
     assert result["selected_agent"] == "knowledge"
+
+
+def test_router_uses_llm_selected_submit_master(monkeypatch):
+    monkeypatch.setattr(go, "llm_router_tool", FakeRouter("submit_master"))
+
+    result = go.router_node(
+        {
+            "message": "retry failed submit master workflow",
+            "selected_agent": "",
+            "response": "",
+        }
+    )
+
+    assert result["selected_agent"] == "submit_master"
 
 
 def test_router_failure_returns_routing_error_not_general(monkeypatch):
@@ -91,9 +109,6 @@ def test_route_after_router_rejects_removed_echo_agent():
     assert result == go.ROUTING_ERROR
 
 
-from bioops.graph_orchestrator import get_enabled_agent_names
-
-
 def test_enabled_agents_loaded_from_yaml_style_config():
     config = {
         "agents": {
@@ -101,12 +116,13 @@ def test_enabled_agents_loaded_from_yaml_style_config():
             "knowledge": {"enabled": True},
             "cluster_health": {"enabled": False},
             "review": {"enabled": False},
+            "submit_master": {"enabled": True},
         }
     }
 
-    enabled = get_enabled_agent_names(config)
+    enabled = go.get_enabled_agent_names(config)
 
-    assert enabled == {"general", "knowledge"}
+    assert enabled == {"general", "knowledge", "submit_master"}
 
 
 def test_general_is_mandatory_even_if_disabled():
@@ -116,10 +132,11 @@ def test_general_is_mandatory_even_if_disabled():
             "knowledge": {"enabled": False},
             "cluster_health": {"enabled": False},
             "review": {"enabled": False},
+            "submit_master": {"enabled": False},
         }
     }
 
-    enabled = get_enabled_agent_names(config)
+    enabled = go.get_enabled_agent_names(config)
 
     assert enabled == {"general"}
 
@@ -130,10 +147,10 @@ def test_unsupported_agents_are_ignored():
             "general": {"enabled": True},
             "knowledge": {"enabled": False},
             "batch_status": {"enabled": True},
-            "storage": {"enabled": True},
+            "submit_master": {"enabled": True},
         }
     }
 
-    enabled = get_enabled_agent_names(config)
+    enabled = go.get_enabled_agent_names(config)
 
-    assert enabled == {"general"}
+    assert enabled == {"general", "submit_master"}

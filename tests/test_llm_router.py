@@ -15,7 +15,6 @@ def test_default_allowed_agents_are_supported_agents():
 
 def test_parse_valid_router_json():
     tool = LLMRouterTool()
-
     decision = tool._parse_response(
         '{"agent": "knowledge", "reason": "User asks about documentation."}'
     )
@@ -24,13 +23,22 @@ def test_parse_valid_router_json():
     assert decision.reason == "User asks about documentation."
 
 
+def test_parse_submit_master_router_json():
+    tool = LLMRouterTool()
+    decision = tool._parse_response(
+        '{"agent": "submit_master", "reason": "User asks about Submit Master retry."}'
+    )
+
+    assert decision.agent == "submit_master"
+    assert decision.reason == "User asks about Submit Master retry."
+
+
 def test_parse_json_from_markdown_block():
     tool = LLMRouterTool()
-
     decision = tool._parse_response(
         """```json
-        {"agent": "cluster_health", "reason": "User asks about failed pods."}
-        ```"""
+{"agent": "cluster_health", "reason": "User asks about failed pods."}
+```"""
     )
 
     assert decision.agent == "cluster_health"
@@ -67,4 +75,19 @@ def test_prompt_lists_only_enabled_agents():
     assert "- knowledge:" in prompt
     assert "- review:" not in prompt
     assert "- cluster_health:" not in prompt
+    assert "- submit_master:" not in prompt
     assert '"agent": "general|knowledge"' in prompt
+
+
+def test_prompt_contains_submit_master_d1_to_d5_guidance():
+    tool = LLMRouterTool(allowed_agents={"general", "submit_master"})
+
+    prompt = tool._build_prompt("retry failed submit master workflow")
+
+    assert "- submit_master:" in prompt
+    assert "D1" in prompt
+    assert "D2" in prompt
+    assert "D3" in prompt
+    assert "D4" in prompt
+    assert "D5" in prompt
+    assert "safe retry" in prompt

@@ -15,7 +15,13 @@ from bioops.tools.llm_router import LLMRouterTool
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 AGENTS_CONFIG_PATH = PROJECT_ROOT / "configs" / "agents.yaml"
 
-SUPPORTED_AGENTS = {"general", "knowledge", "cluster_health", "review", "submit_master"}
+SUPPORTED_AGENTS = {
+    "general",
+    "knowledge",
+    "cluster_health",
+    "review",
+    "submit_master",
+}
 MANDATORY_AGENTS = {"general"}
 ROUTING_ERROR = "routing_error"
 
@@ -33,12 +39,9 @@ cluster_health_agent: ClusterHealthAgent | None = None
 submit_master_agent: SubmitMasterAgent | None = None
 
 _llm_router_tool: LLMRouterTool | None = None
-# Compatibility hook for tests. This is intentionally None on import,
-# so it does not create an LLMRouterTool side effect.
 llm_router_tool: Any | None = None
 _active_enabled_agent_names: set[str] | None = None
 
-# Kept as a module-level name for compatibility, but compiled lazily.
 graph = None
 
 
@@ -49,35 +52,22 @@ def load_agents_config(path: Path = AGENTS_CONFIG_PATH) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as handle:
         data = yaml.safe_load(handle) or {}
 
-    if not isinstance(data, dict):
-        return {}
-
-    return data
+    return data if isinstance(data, dict) else {}
 
 
 def get_agents_section(config: dict[str, Any] | None = None) -> dict[str, Any]:
     config = config if config is not None else load_agents_config()
-
     agents_section = config.get("agents", config)
-
-    if not isinstance(agents_section, dict):
-        return {}
-
-    return agents_section
+    return agents_section if isinstance(agents_section, dict) else {}
 
 
 def get_enabled_agent_names(config: dict[str, Any] | None = None) -> set[str]:
     agents_section = get_agents_section(config)
-
     enabled_agents = set(MANDATORY_AGENTS)
 
     for agent_name in SUPPORTED_AGENTS:
         agent_config = agents_section.get(agent_name, {})
-
-        if not isinstance(agent_config, dict):
-            continue
-
-        if agent_config.get("enabled", False):
+        if isinstance(agent_config, dict) and agent_config.get("enabled", False):
             enabled_agents.add(agent_name)
 
     return enabled_agents
@@ -92,9 +82,7 @@ def get_active_enabled_agent_names() -> set[str]:
     return set(_active_enabled_agent_names)
 
 
-def get_llm_router_tool(
-    enabled_agent_names: set[str] | None = None,
-) -> LLMRouterTool:
+def get_llm_router_tool(enabled_agent_names: set[str] | None = None) -> LLMRouterTool:
     global _llm_router_tool
     global llm_router_tool
 
@@ -135,46 +123,36 @@ def reset_orchestrator_cache() -> None:
 
 def get_general_agent() -> GeneralAgent:
     global general_agent
-
     if general_agent is None:
         general_agent = GeneralAgent()
-
     return general_agent
 
 
 def get_knowledge_agent() -> KnowledgeAgent:
     global knowledge_agent
-
     if knowledge_agent is None:
         knowledge_agent = KnowledgeAgent()
-
     return knowledge_agent
 
 
 def get_review_agent() -> ReviewAgent:
     global review_agent
-
     if review_agent is None:
         review_agent = ReviewAgent()
-
     return review_agent
 
 
 def get_cluster_health_agent() -> ClusterHealthAgent:
     global cluster_health_agent
-
     if cluster_health_agent is None:
         cluster_health_agent = ClusterHealthAgent()
-
     return cluster_health_agent
 
 
 def get_submit_master_agent() -> SubmitMasterAgent:
     global submit_master_agent
-
     if submit_master_agent is None:
         submit_master_agent = SubmitMasterAgent()
-
     return submit_master_agent
 
 
@@ -186,6 +164,7 @@ def router_node(state: BioOpsState) -> dict:
     No keyword fallback is used. If the LLM router is unavailable, invalid,
     or misconfigured, return a clear routing error instead of guessing.
     """
+
     enabled_agent_names = get_active_enabled_agent_names()
 
     try:
@@ -193,13 +172,10 @@ def router_node(state: BioOpsState) -> dict:
     except Exception as error:
         return {
             "selected_agent": ROUTING_ERROR,
-            "response": _format_routing_error(
-                f"{type(error).__name__}: {error}"
-            ),
+            "response": _format_routing_error(f"{type(error).__name__}: {error}"),
         }
 
     selected_agent = decision.agent
-
     if selected_agent not in enabled_agent_names:
         return {
             "selected_agent": ROUTING_ERROR,
@@ -208,18 +184,13 @@ def router_node(state: BioOpsState) -> dict:
             ),
         }
 
-    return {
-        "selected_agent": selected_agent,
-        "response": "",
-    }
+    return {"selected_agent": selected_agent, "response": ""}
 
 
 def route_after_router(state: BioOpsState) -> str:
     selected_agent = state.get("selected_agent", ROUTING_ERROR)
-
     if selected_agent in get_active_enabled_agent_names():
         return selected_agent
-
     return ROUTING_ERROR
 
 
@@ -268,7 +239,6 @@ def _format_routing_error(error: str) -> str:
 
 def build_graph():
     graph_builder = StateGraph(BioOpsState)
-
     enabled_agent_names = get_active_enabled_agent_names()
 
     agent_nodes = {
@@ -287,17 +257,10 @@ def build_graph():
 
     graph_builder.set_entry_point("router")
 
-    route_map = {
-        agent_name: agent_name
-        for agent_name in sorted(enabled_agent_names)
-    }
+    route_map = {agent_name: agent_name for agent_name in sorted(enabled_agent_names)}
     route_map[ROUTING_ERROR] = ROUTING_ERROR
 
-    graph_builder.add_conditional_edges(
-        "router",
-        route_after_router,
-        route_map,
-    )
+    graph_builder.add_conditional_edges("router", route_after_router, route_map)
 
     for agent_name in sorted(enabled_agent_names):
         graph_builder.add_edge(agent_name, END)
@@ -309,10 +272,8 @@ def build_graph():
 
 def get_graph():
     global graph
-
     if graph is None:
         graph = build_graph()
-
     return graph
 
 
@@ -324,5 +285,4 @@ def run_graph(message: str) -> str:
             "response": "",
         }
     )
-
     return result.get("response", "")

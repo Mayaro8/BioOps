@@ -9,21 +9,17 @@ from bioops.agents.base import BaseAgent
 from bioops.tools.argo_ui_launcher import ArgoUiLauncher
 from bioops.tools.argo_workflow_monitor import ArgoWorkflowMonitor
 
+
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 AGENTS_CONFIG_PATH = PROJECT_ROOT / "configs" / "agents.yaml"
 
 
 class SubmitMasterAgent(BaseAgent):
-    """SubmitMaster agent.
-
-    D1: open Argo UI for SubmitMaster.
-    D3: summarize SubmitMaster workflow progress without duplicating pod health.
-    """
+    """SubmitMaster operations agent for Epic D."""
 
     name = "submit_master"
     description = (
-        "Opens the Argo UI for launching SubmitMaster and reports "
-        "workflow-level SubmitMaster progress."
+        "Launches, monitors, reports, and safely retries Submit Master Argo workflows."
     )
 
     def __init__(self, config_path: Path = AGENTS_CONFIG_PATH) -> None:
@@ -67,22 +63,18 @@ class SubmitMasterAgent(BaseAgent):
         if self._is_progress_request(lowered):
             return self.monitor.render_latest_progress()
 
-        return (
-            "SubmitMaster supports two actions:\n\n"
-            "1. Launch UI:\n"
-            "- launch submit master\n"
-            "- open argo ui\n\n"
-            "2. Check workflow progress:\n"
-            "- submit master status\n"
-            "- where is submit master\n"
-            "- submit master progress\n"
-            "- show failed submit master samples\n\n"
-            "For raw pod health, use ClusterHealthAgent."
-        )
+        if self._is_failure_report_request(lowered):
+            return self._d4_help()
+
+        if self._is_retry_request(lowered):
+            return self._d5_help()
+
+        return self._help()
 
     def _is_launch_request(self, lowered: str) -> bool:
         return (
             "launch submit master" in lowered
+            or "run submit master" in lowered
             or "open submit master" in lowered
             or "submit master ui" in lowered
             or "open argo" in lowered
@@ -94,15 +86,63 @@ class SubmitMasterAgent(BaseAgent):
             "status",
             "progress",
             "where",
-            "failed",
-            "failure",
             "bottleneck",
             "workflow",
             "dag",
             "current step",
+            "monitor",
+            "failed samples",
+        )
+        return "submit master" in lowered and any(
+            term in lowered for term in progress_terms
         )
 
-        return "submit master" in lowered and any(term in lowered for term in progress_terms)
+    def _is_failure_report_request(self, lowered: str) -> bool:
+        return (
+            "submit master" in lowered
+            and any(term in lowered for term in ("d4", "failed pod", "failure report"))
+        )
+
+    def _is_retry_request(self, lowered: str) -> bool:
+        return (
+            "submit master" in lowered
+            and any(term in lowered for term in ("d5", "retry", "restart", "resubmit"))
+        )
+
+    def _help(self) -> str:
+        return (
+            "SubmitMaster Agent\n\n"
+            "Supported actions:\n\n"
+            "1. Launch/open SubmitMaster in Argo:\n"
+            "- launch submit master\n"
+            "- open submit master\n"
+            "- open argo ui\n\n"
+            "2. Check workflow progress:\n"
+            "- submit master status\n"
+            "- submit master progress\n"
+            "- where is submit master\n\n"
+            "3. Failed workflow report:\n"
+            "- python -m bioops.jobs.submit_master_d4_failure_bitrix_report\n\n"
+            "4. Safe retry/resubmission:\n"
+            "- python -m bioops.jobs.submit_master_d5_retry_bitrix_report --auto-retry\n\n"
+            "For generic Kubernetes pod health, use ClusterHealthAgent."
+        )
+
+    def _d4_help(self) -> str:
+        return (
+            "SubmitMaster D4 failed-pod report is handled by:\n\n"
+            "python -m bioops.jobs.submit_master_d4_failure_bitrix_report\n\n"
+            "It inspects failed/error SubmitMaster workflow nodes and sends the report "
+            "to Bitrix when webhook settings are provided."
+        )
+
+    def _d5_help(self) -> str:
+        return (
+            "SubmitMaster D5 safe retry is handled by:\n\n"
+            "python -m bioops.jobs.submit_master_d5_retry_bitrix_report --auto-retry\n\n"
+            "It should only retry known transient failures, caps retry attempts, "
+            "blocks duplicate active retries, and annotates resubmitted workflows."
+        )
 
     def _load_config(self, path: Path) -> dict[str, Any]:
         if not path.exists():

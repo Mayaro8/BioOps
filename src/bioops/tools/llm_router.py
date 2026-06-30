@@ -6,9 +6,14 @@ from typing import Any
 from openai import AzureOpenAI
 
 
-DEFAULT_ALLOWED_AGENTS = {"general", "knowledge", "cluster_health", "review", "submit_master"}
+DEFAULT_ALLOWED_AGENTS = {
+    "general",
+    "knowledge",
+    "cluster_health",
+    "review",
+    "submit_master",
+}
 
-# Backward-compatible alias for older imports/tests.
 ALLOWED_AGENTS = DEFAULT_ALLOWED_AGENTS
 
 
@@ -21,10 +26,11 @@ class RouterDecision:
 class LLMRouterTool:
     """LLM-only router for BioOps agent selection."""
 
-    def __init__(self, allowed_agents: set[str] | list[str] | tuple[str, ...] | None = None):
+    def __init__(
+        self,
+        allowed_agents: set[str] | list[str] | tuple[str, ...] | None = None,
+    ):
         self.allowed_agents = set(allowed_agents or DEFAULT_ALLOWED_AGENTS)
-
-        # General must always exist as the safe fallback category.
         self.allowed_agents.add("general")
 
         unsupported_agents = self.allowed_agents - DEFAULT_ALLOWED_AGENTS
@@ -43,12 +49,7 @@ class LLMRouterTool:
         )
 
         self.enabled = all(
-            [
-                self.endpoint,
-                self.api_key,
-                self.api_version,
-                self.deployment,
-            ]
+            [self.endpoint, self.api_key, self.api_version, self.deployment]
         )
 
         self.client = None
@@ -68,41 +69,27 @@ class LLMRouterTool:
             )
 
         prompt = self._build_prompt(message)
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You route BioOps user requests to exactly one enabled agent. "
+                    "Return strict JSON only."
+                ),
+            },
+            {"role": "user", "content": prompt},
+        ]
 
         try:
             response = self.client.chat.completions.create(
                 model=self.deployment,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You route BioOps user requests to exactly one enabled agent. "
-                            "Return strict JSON only."
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt,
-                    },
-                ],
+                messages=messages,
                 max_completion_tokens=250,
             )
         except TypeError:
             response = self.client.chat.completions.create(
                 model=self.deployment,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You route BioOps user requests to exactly one enabled agent. "
-                            "Return strict JSON only."
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt,
-                    },
-                ],
+                messages=messages,
                 max_tokens=250,
             )
         except Exception as error:
@@ -110,30 +97,33 @@ class LLMRouterTool:
                 f"LLM router request failed: {type(error).__name__}: {error}"
             ) from error
 
-        content = response.choices[0].message.content or ""
-        return self._parse_response(content)
+        return self._parse_response(response.choices[0].message.content or "")
 
     def _build_prompt(self, message: str) -> str:
         agent_descriptions = {
             "general": (
                 "general conversation, greetings, broad questions, unclear requests, "
-                "or anything that does not require a specialist BioOps tool"
+                "or non-specialist BioOps tasks"
             ),
             "knowledge": (
-                "questions about BioOps documentation, pipeline steps, workflow metadata, "
+                "BioOps documentation, pipeline step explanations, workflow metadata, "
                 "command examples, source code explanations, or stored project knowledge"
             ),
             "cluster_health": (
-                "Kubernetes cluster state, pods, pod logs, failed/running jobs, health monitor, "
-                "Bitrix health alerts, cost, ETA, or pipeline runtime status"
+                "general Kubernetes cluster health, pods, pod logs, failed/running jobs, "
+                "health monitor, Bitrix health alerts, cost, ETA, or runtime status "
+                "when the request is not specifically about Submit Master"
             ),
             "review": (
-                "code review, repository review, GitHub pull requests, branch comparison, "
-                "diffs, suspicious files, implementation risks, or missing tests"
+                "code review, repository review, GitHub pull requests, branch comparisons, "
+                "diffs, implementation risks, suspicious files, or missing tests"
             ),
             "submit_master": (
-                "submit-master config generation, original-compatible pipeline submission configs, "
-                "safe submit-master launch plans, Argo workflow launch preparation, failed submit-master runs"
+                "Submit Master and Argo SubmitMaster workflow operations: "
+                "D1 config generation, D2 Submit Master launch or run preparation, "
+                "D3 Submit Master progress/status/log/error monitoring, "
+                "D4 failed Submit Master pod or workflow-node reports, "
+                "D5 safe retry or resubmission of failed Submit Master workflows"
             ),
         }
 
@@ -141,8 +131,7 @@ class LLMRouterTool:
             f"- {agent}: {agent_descriptions[agent]}"
             for agent in sorted(self.allowed_agents)
         )
-
-        allowed_agent_values = "|".join(sorted(self.allowed_agents))
+        allowed_values = "|".join(sorted(self.allowed_agents))
 
         return f"""
 Choose exactly one enabled BioOps agent for this user request.
@@ -154,15 +143,14 @@ Rules:
 - Use full context, not single keywords.
 - Choose only one of the enabled agents listed above.
 - Do not choose an agent that is not listed above.
+- Choose submit_master for requests about Submit Master, Config Creator, SubmitMaster Argo workflows, D1/D2/D3/D4/D5, Submit Master progress, Submit Master failures, failed Submit Master pods, or safe retry/resubmission of Submit Master workflows.
+- Choose cluster_health for general Kubernetes pod or cluster health questions that are not specifically about Submit Master.
 - Do not choose review only because the word "review" appears if the user is asking about health logs or documentation.
-- Do not choose knowledge only because the word "explain" appears; decide whether the explanation needs docs, cluster status, code review, or general response.
+- Do not choose knowledge only because the word "explain" appears; decide whether the explanation needs docs, cluster status, code review, Submit Master operation, or general response.
 - Return JSON only.
 
 JSON shape:
-{{
-  "agent": "{allowed_agent_values}",
-  "reason": "short reason"
-}}
+{{ "agent": "{allowed_values}", "reason": "short reason" }}
 
 User request:
 {message}
@@ -170,7 +158,6 @@ User request:
 
     def _parse_response(self, content: str) -> RouterDecision:
         data = self._parse_json(content)
-
         if not isinstance(data, dict):
             raise ValueError("LLM router returned non-JSON or invalid JSON content.")
 
@@ -181,11 +168,8 @@ User request:
             raise ValueError("LLM router response is missing string field 'agent'.")
 
         agent = agent.strip().lower()
-
         if agent not in self.allowed_agents:
-            raise ValueError(
-                f"LLM router returned disabled or unsupported agent: {agent}"
-            )
+            raise ValueError(f"LLM router returned disabled or unsupported agent: {agent}")
 
         if not isinstance(reason, str) or not reason.strip():
             reason = "No reason provided."
