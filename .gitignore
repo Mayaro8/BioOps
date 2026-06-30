@@ -217,3 +217,15 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 src/bioops/agents/chatgpt.ipynbsrc/bioops/agents/chatgpt.ipynb
+
+# External/original SubmitMaster and Config Creator sources kept locally only
+submit_master_files/
+
+# Local/placeholder Argo SubmitMaster scaffolding kept locally only
+k8s/argo/local/
+k8s/argo/real/
+k8s/argo/company/
+
+# Recovery/generated archives
+*.zip
+*.bak
