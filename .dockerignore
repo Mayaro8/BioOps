@@ -17,3 +17,10 @@ qdrant_storage
 kubectl
 minikube-linux-amd64
 *.pdf
+
+# Do not copy original SubmitMaster / Config Creator into the BioOps API image
+submit_master_files/
+k8s/argo/local/
+k8s/argo/real/
+k8s/argo/company/
+*.zip
