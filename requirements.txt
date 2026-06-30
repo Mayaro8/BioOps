@@ -1,0 +1,13 @@
+openai
+langgraph
+qdrant-client
+pydantic
+pyyaml
+python-dotenv
+typer
+rich
+kubernetes
+PyGithub
+pytest
+pypdf
+typing-extensions

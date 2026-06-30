@@ -1,0 +1,27 @@
+agents:
+  general:
+    enabled: true
+    description: "Fallback agent for greetings, unclear requests, and unsupported tasks."
+
+  knowledge:
+    enabled: true
+    description: "Answers questions about BioOps documentation, pipeline metadata, source code, inputs, outputs, and explanations."
+
+  cluster_health:
+    enabled: true
+    description: "Checks Kubernetes cluster health, pods, logs, unhealthy containers, running steps, cost, and ETA."
+    namespace: bioops
+    request_timeout_seconds: 5
+    log_tail_lines: 50
+    cost:
+      mode: local_free
+      currency: rub
+    step_eta_minutes:
+      bam-to-gvcf: 120
+      gvcf-to-vcf: 45
+      transfer-bam: 10
+      transfer-vcf: 10
+
+  review:
+    enabled: true
+    description: "Reviews repositories, PRs/MRs, code changes, risks, style, logic issues, and missing tests."
