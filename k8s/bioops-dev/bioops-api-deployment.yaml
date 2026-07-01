@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bioops-api
+  namespace: bioops-dev
+  labels:
+    app: bioops-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bioops-api
+  template:
+    metadata:
+      labels:
+        app: bioops-api
+    spec:
+      serviceAccountName: bioops-student
+      containers:
+        - name: bioops-api
+          image: cr.yandex/crp5l1da4kinv8ofomr5/fastmri-students/bioops:aafd618
+          imagePullPolicy: Always
+          command:
+            - uvicorn
+          args:
+            - bioops.api.bitrix_app:app
+            - --host
+            - 0.0.0.0
+            - --port
+            - "8000"
+          ports:
+            - containerPort: 8000
+              name: http
+          env:
+            - name: PYTHONPATH
+              value: /app/src
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bioops-api
+  namespace: bioops-dev
+  labels:
+    app: bioops-api
+spec:
+  type: ClusterIP
+  selector:
+    app: bioops-api
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
