@@ -59,7 +59,7 @@ agents:
   batch_status:
     enabled: true
     description: "Tracks Argo batch workflow statuses, updates Google Sheet, and answers batch status questions."
-    argo_namespace: bioops-dev
+    argo_namespace: argo
     argo_workflow_template: bioops-submit-master-local
     workflow_name_prefix: bioops-submit-master
     recent_workflow_limit: 20
