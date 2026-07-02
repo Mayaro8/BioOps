@@ -92,11 +92,13 @@ def main() -> None:
     # are configured in the image.
     from bioops.tools.google_sheet_status_sync import GoogleSheetStatusSync
 
+    sheet_rows = store.list_rows(limit=args.sheet_limit)
+
     sync = GoogleSheetStatusSync(
         spreadsheet_id=sheet_config.get("spreadsheet_id", ""),
         worksheet_name=sheet_config.get("worksheet_name", "batch_status"),
     )
-    result = sync.upsert_rows(rows)
+    result = sync.upsert_rows(sheet_rows)
 
     print("")
     print("Google Sheet updated")
@@ -128,6 +130,12 @@ def parse_args() -> argparse.Namespace:
         "--no-sheet",
         action="store_true",
         help="Update database only; do not sync to Google Sheet.",
+    )
+    parser.add_argument(
+        "--sheet-limit",
+        type=int,
+        default=500,
+        help="Maximum number of DB rows to sync to Google Sheet.",
     )
     return parser.parse_args()
 

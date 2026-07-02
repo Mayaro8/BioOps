@@ -10,25 +10,28 @@ spec:
   failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
-      backoffLimit: 0
       template:
         spec:
           serviceAccountName: bioops-student
           restartPolicy: Never
           containers:
             - name: batch-status-sync
-              image: cr.yandex/crp5l1da4kinv8ofomr5/fastmri-students/bioops:batch-status-f1
+              image: cr.yandex/crp5l1da4kinv8ofomr5/fastmri-students/bioops:batch-status-csv
               imagePullPolicy: Always
-              command: ["python3", "-m", "bioops.jobs.batch_status_sync"]
-              args:
-                - "--limit"
-                - "100"
-                - "--no-sheet"
-                - "--db-path"
-                - "/data/bioops_batch_status.sqlite3"
-              envFrom:
-                - secretRef:
-                    name: bioops-env
+              command:
+                - /bin/sh
+                - -lc
+                - |
+                  python3 -m bioops.jobs.batch_status_sync \
+                    --limit 100 \
+                    --no-sheet \
+                    --db-path /data/bioops_batch_status.sqlite3
+
+                  python3 -m bioops.jobs.batch_status_export \
+                    --db-path /data/bioops_batch_status.sqlite3 \
+                    --csv-path /data/batch_status.csv \
+                    --json-path /data/batch_status.json \
+                    --limit 1000
               volumeMounts:
                 - name: batch-status-db
                   mountPath: /data
