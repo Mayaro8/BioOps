@@ -1,0 +1,38 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: batch-status-sync
+  namespace: bioops-dev
+spec:
+  schedule: "*/15 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        spec:
+          serviceAccountName: bioops-student
+          restartPolicy: Never
+          containers:
+            - name: batch-status-sync
+              image: cr.yandex/crp5l1da4kinv8ofomr5/fastmri-students/bioops:batch-status-f1
+              imagePullPolicy: Always
+              command: ["python3", "-m", "bioops.jobs.batch_status_sync"]
+              args:
+                - "--limit"
+                - "100"
+                - "--no-sheet"
+                - "--db-path"
+                - "/data/bioops_batch_status.sqlite3"
+              envFrom:
+                - secretRef:
+                    name: bioops-env
+              volumeMounts:
+                - name: batch-status-db
+                  mountPath: /data
+          volumes:
+            - name: batch-status-db
+              persistentVolumeClaim:
+                claimName: bioops-batch-status-db

@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 from typing import Any
 
 import yaml
 
 from bioops.tools.batch_status_argo import BatchStatusArgoScanner
-from bioops.tools.batch_status_rows import SHEET_COLUMNS, workflows_to_batch_status_rows
-from bioops.tools.google_sheet_status_sync import GoogleSheetStatusSync
+from bioops.tools.batch_status_rows import workflows_to_batch_status_rows
+from bioops.tools.batch_status_store import BatchStatusStore
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -18,12 +19,13 @@ AGENTS_CONFIG_PATH = PROJECT_ROOT / "configs" / "agents.yaml"
 def main() -> None:
     args = parse_args()
     config = load_config()
-    batch_config = config.get("agents", {}).get("batch_status", {})
-    submit_config = config.get("agents", {}).get("submit_master", {})
+
+    batch_config = config.get("agents", {}).get("batch_status", {}) or {}
+    submit_config = config.get("agents", {}).get("submit_master", {}) or {}
 
     namespace = batch_config.get(
         "argo_namespace",
-        submit_config.get("argo_namespace", "argo"),
+        submit_config.get("argo_namespace", "bioops-dev"),
     )
     workflow_template_name = batch_config.get(
         "argo_workflow_template",
@@ -42,6 +44,7 @@ def main() -> None:
     )
 
     workflows = scanner.list_matching_workflows()
+
     if args.limit:
         workflows = workflows[: args.limit]
 
@@ -50,7 +53,7 @@ def main() -> None:
         argo_ui_url=submit_config.get("argo_ui_url", ""),
     )
 
-    print(f"Batch Status Sync")
+    print("Batch Status Sync")
     print(f"Namespace: {namespace}")
     print(f"Workflows found: {len(workflows)}")
     print(f"Rows prepared: {len(rows)}")
@@ -60,7 +63,35 @@ def main() -> None:
         print_table(rows)
         return
 
+    db_path = (
+        args.db_path
+        or os.getenv("BATCH_STATUS_DB_PATH")
+        or batch_config.get("db_path")
+        or "/tmp/bioops_batch_status.sqlite3"
+    )
+
+    store = BatchStatusStore(db_path)
+    db_result = store.upsert_rows(rows)
+
+    print("")
+    print("Database updated")
+    print(f"db_path: {db_path}")
+    for key, value in db_result.items():
+        print(f"{key}: {value}")
+
+    if args.no_sheet:
+        return
+
     sheet_config = batch_config.get("google_sheet", {}) or {}
+    if not sheet_config.get("enabled", False):
+        print("")
+        print("Google Sheet sync skipped: google_sheet.enabled is false.")
+        return
+
+    # Lazy import so DB-only mode works even before Google API dependencies
+    # are configured in the image.
+    from bioops.tools.google_sheet_status_sync import GoogleSheetStatusSync
+
     sync = GoogleSheetStatusSync(
         spreadsheet_id=sheet_config.get("spreadsheet_id", ""),
         worksheet_name=sheet_config.get("worksheet_name", "batch_status"),
@@ -74,17 +105,29 @@ def main() -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Sync Argo batch statuses to Google Sheet.")
+    parser = argparse.ArgumentParser(
+        description="Sync Argo batch statuses to database and optional Google Sheet."
+    )
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Print extracted rows without updating Google Sheet.",
+        help="Print extracted rows without updating database or Google Sheet.",
     )
     parser.add_argument(
         "--limit",
         type=int,
         default=0,
         help="Limit number of workflows processed.",
+    )
+    parser.add_argument(
+        "--db-path",
+        default="",
+        help="SQLite database path for storing batch status rows.",
+    )
+    parser.add_argument(
+        "--no-sheet",
+        action="store_true",
+        help="Update database only; do not sync to Google Sheet.",
     )
     return parser.parse_args()
 
