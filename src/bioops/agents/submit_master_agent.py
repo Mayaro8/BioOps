@@ -8,6 +8,7 @@ import yaml
 from bioops.agents.base import BaseAgent
 from bioops.tools.argo_ui_launcher import ArgoUiLauncher
 from bioops.tools.argo_workflow_monitor import ArgoWorkflowMonitor
+from bioops.jobs.submit_master_d4_failure_bitrix_report import render_failure_report
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -52,6 +53,14 @@ class SubmitMasterAgent(BaseAgent):
             recent_workflow_limit=int(submit_config.get("recent_workflow_limit", 5)),
             step_patterns=submit_config.get("step_patterns"),
         )
+
+        self.d4_namespace = argo_namespace
+        self.d4_workflow_prefix = submit_config.get(
+            "d4_workflow_prefix",
+            submit_config.get("workflow_name_prefix", "bioops-submit-master"),
+        )
+        self.d4_workflow_template = workflow_template_name
+        self.d4_log_tail_lines = int(submit_config.get("d4_log_tail_lines", 80))
 
     def run(self, message: str) -> str:
         lowered = message.lower()

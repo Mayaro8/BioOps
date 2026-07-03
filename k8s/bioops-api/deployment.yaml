@@ -16,38 +16,50 @@ spec:
         app: bioops-api
     spec:
       containers:
-        - name: bioops-api
-          image: cr.yandex/crp5l1da4kinv8ofomr5/fastmri-students/bioops:bitrix-api-v1
-          imagePullPolicy: Always
-          command: ["python", "-m", "uvicorn"]
-          args:
-            - bioops.api.bitrix_app:app
-            - --host
-            - 0.0.0.0
-            - --port
-            - "8000"
-          ports:
-            - containerPort: 8000
-          env:
-            - name: BITRIX_WEBHOOK_URL
-              valueFrom:
-                secretKeyRef:
-                  name: bioops-api-secrets
-                  key: BITRIX_WEBHOOK_URL
-            - name: BITRIX_DIALOG_ID
-              valueFrom:
-                secretKeyRef:
-                  name: bioops-api-secrets
-                  key: BITRIX_DIALOG_ID
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: 8000
-            initialDelaySeconds: 5
-            periodSeconds: 10
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: 8000
-            initialDelaySeconds: 15
-            periodSeconds: 20
+      - name: bioops-api
+        image: cr.yandex/crp5l1da4kinv8ofomr5/fastmri-students/bioops:bitrix-api-v1
+        imagePullPolicy: Always
+        command:
+        - python
+        - -m
+        - uvicorn
+        args:
+        - bioops.api.bitrix_app:app
+        - --host
+        - 0.0.0.0
+        - --port
+        - '8000'
+        ports:
+        - containerPort: 8000
+        env:
+        - name: BITRIX_WEBHOOK_URL
+          valueFrom:
+            secretKeyRef:
+              name: bioops-api-secrets
+              key: BITRIX_WEBHOOK_URL
+        - name: BITRIX_DIALOG_ID
+          valueFrom:
+            secretKeyRef:
+              name: bioops-api-secrets
+              key: BITRIX_DIALOG_ID
+        - name: BATCH_STATUS_DB_PATH
+          value: /data/bioops_batch_status.sqlite3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        volumeMounts:
+        - name: batch-status-db
+          mountPath: /data
+      volumes:
+      - name: batch-status-db
+        persistentVolumeClaim:
+          claimName: bioops-batch-status-db
