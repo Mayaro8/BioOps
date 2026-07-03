@@ -1,6 +1,3 @@
-cd /home/mayar/bio-ops-private-sync
-
-cat > src/bioops/main.py <<'PY'
 from __future__ import annotations
 
 import sys
@@ -85,6 +82,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-PY
 
-python3 -m py_compile src/bioops/main.py

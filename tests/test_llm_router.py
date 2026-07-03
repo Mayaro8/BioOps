@@ -10,6 +10,7 @@ def test_default_allowed_agents_are_supported_agents():
         "cluster_health",
         "review",
         "submit_master",
+        "batch_status",
     }
 
 
@@ -31,6 +32,15 @@ def test_parse_submit_master_router_json():
 
     assert decision.agent == "submit_master"
     assert decision.reason == "User asks about Submit Master retry."
+
+def test_parse_batch_status_router_json():
+    tool = LLMRouterTool()
+    decision = tool._parse_response(
+        '{"agent": "batch_status", "reason": "User asks about failed batches."}'
+    )
+
+    assert decision.agent == "batch_status"
+    assert decision.reason == "User asks about failed batches."
 
 
 def test_parse_json_from_markdown_block():
@@ -91,3 +101,13 @@ def test_prompt_contains_submit_master_d1_to_d5_guidance():
     assert "D4" in prompt
     assert "D5" in prompt
     assert "safe retry" in prompt
+
+
+def test_prompt_contains_batch_status_guidance():
+    tool = LLMRouterTool(allowed_agents={"general", "batch_status"})
+    prompt = tool._build_prompt("show failed batches")
+
+    assert "- batch_status:" in prompt
+    assert "latest batch status" in prompt
+    assert "failed batches" in prompt
+    assert '"agent": "batch_status|general"' in prompt

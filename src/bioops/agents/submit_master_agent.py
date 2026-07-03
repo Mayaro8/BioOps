@@ -69,11 +69,16 @@ class SubmitMasterAgent(BaseAgent):
             result = self.launcher.launch(start_port_forward=True)
             return result.message
 
+        if self._is_failure_report_request(lowered):
+            return render_failure_report(
+                namespace=self.d4_namespace,
+                workflow_prefix=self.d4_workflow_prefix,
+                workflow_template=self.d4_workflow_template,
+                log_tail_lines=self.d4_log_tail_lines,
+            )
+
         if self._is_progress_request(lowered):
             return self.monitor.render_latest_progress()
-
-        if self._is_failure_report_request(lowered):
-            return self._d4_help()
 
         if self._is_retry_request(lowered):
             return self._d5_help()

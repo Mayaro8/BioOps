@@ -12,6 +12,7 @@ DEFAULT_ALLOWED_AGENTS = {
     "cluster_health",
     "review",
     "submit_master",
+    "batch_status",
 }
 
 ALLOWED_AGENTS = DEFAULT_ALLOWED_AGENTS
@@ -61,6 +62,13 @@ class LLMRouterTool:
                 timeout=30.0,
             )
 
+    def _strip_surrogates(self, text: str) -> str:
+        """Remove invalid Unicode surrogate code points before sending text to Azure."""
+        return "".join(
+            char for char in text
+            if not 0xD800 <= ord(char) <= 0xDFFF
+        )
+
     def route(self, message: str) -> RouterDecision:
         if not self.enabled or self.client is None:
             raise RuntimeError(
@@ -68,12 +76,13 @@ class LLMRouterTool:
                 "are not fully configured."
             )
 
-        prompt = self._build_prompt(message)
+        message = self._strip_surrogates(message)
+        prompt = self._strip_surrogates(self._build_prompt(message))
         messages = [
             {
                 "role": "system",
                 "content": (
-                    "You route BioOps user requests to exactly one enabled agent. "
+                    "You route BioOps user requests to exactly one enabled agent.\n"
                     "Return strict JSON only."
                 ),
             },
@@ -125,6 +134,12 @@ class LLMRouterTool:
                 "D4 failed Submit Master pod or workflow-node reports, "
                 "D5 safe retry or resubmission of failed Submit Master workflows"
             ),
+            "batch_status": (
+                "Batch Status Agent requests: batch processing statuses, latest batch status, "
+                "status of a specific batch, failed batches, running batches, completed batches, "
+                "stale batches, status DB records, CSV/JSON status export, or Google Sheet "
+                "batch status synchronization"
+            ),
         }
 
         allowed_lines = "\n".join(
@@ -144,9 +159,10 @@ Rules:
 - Choose only one of the enabled agents listed above.
 - Do not choose an agent that is not listed above.
 - Choose submit_master for requests about Submit Master, Config Creator, SubmitMaster Argo workflows, D1/D2/D3/D4/D5, Submit Master progress, Submit Master failures, failed Submit Master pods, or safe retry/resubmission of Submit Master workflows.
-- Choose cluster_health for general Kubernetes pod or cluster health questions that are not specifically about Submit Master.
+- Choose batch_status for requests about batch status records, latest batch status, failed/running/completed batches, or questions like "status of batch N".
+- Choose cluster_health for general Kubernetes pod or cluster health questions that are not specifically about Submit Master or batch status records.
 - Do not choose review only because the word "review" appears if the user is asking about health logs or documentation.
-- Do not choose knowledge only because the word "explain" appears; decide whether the explanation needs docs, cluster status, code review, Submit Master operation, or general response.
+- Do not choose knowledge only because the word "explain" appears; decide whether the explanation needs docs, cluster status, code review, Submit Master operation, batch status, or general response.
 - Return JSON only.
 
 JSON shape:
@@ -157,6 +173,7 @@ User request:
 """.strip()
 
     def _parse_response(self, content: str) -> RouterDecision:
+        content = self._strip_surrogates(content)
         data = self._parse_json(content)
         if not isinstance(data, dict):
             raise ValueError("LLM router returned non-JSON or invalid JSON content.")
@@ -168,6 +185,7 @@ User request:
             raise ValueError("LLM router response is missing string field 'agent'.")
 
         agent = agent.strip().lower()
+
         if agent not in self.allowed_agents:
             raise ValueError(f"LLM router returned disabled or unsupported agent: {agent}")
 

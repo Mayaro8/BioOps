@@ -20,8 +20,10 @@ SUPPORTED_AGENTS = {
     "knowledge",
     "cluster_health",
     "review",
-    "submit_master",
     "batch_status",
+    "submit_master",
+    "storage",
+    "infra_cost",
 }
 MANDATORY_AGENTS = {"general"}
 ROUTING_ERROR = "routing_error"
