@@ -71,7 +71,6 @@ agents:
       spreadsheet_id: ""
       worksheet_name: batch_status
     db_path: /data/bioops_batch_status.sqlite3
-
   storage:
     enabled: true
     description: Answers read-only bucket inventory questions about paths, object counts, size, file types, storage classes, and inventory freshness.
@@ -82,3 +81,12 @@ agents:
     known_name_suffixes:
       - beagle.imputation.vcf.gz
       - imputation.vcf.gz
+
+  infra_cost:
+    enabled: true
+    description: Monitors cloud infrastructure costs, expensive VMs, GPUs, database health, queues, and cloud functions.
+    compute:
+      provider: mock
+      mock_inventory_path: tests/fixtures/mock_compute_vms.json
+      monthly_cost_threshold_rub: 50000
+      runtime_threshold_hours: 3
