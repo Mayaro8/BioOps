@@ -27,11 +27,121 @@ spec:
         value: sample1,sample2
       - name: stage
         value: "2"
-YAML        )   f"{config['batch_id']}"pleted successfully for ": {sorted(missing)}"INAL_TAG
-(.venv) mayar@stud1:~/bio-ops$ cat > deploy/argo/kustomization.yaml <<'YAML'
-apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization
+      - name: mode
+        value: demo
 
-resources:
-  - knowledge-ingest-template.yaml
-  - submit-master-template.yaml
+  templates:
+    - name: submit-master-demo
+      dag:
+        tasks:
+          - name: config-creator
+            template: config-creator
+            arguments:
+              parameters:
+                - name: batch_id
+                  value: "{{workflow.parameters.batch_id}}"
+                - name: samples
+                  value: "{{workflow.parameters.samples}}"
+                - name: stage
+                  value: "{{workflow.parameters.stage}}"
+                - name: mode
+                  value: "{{workflow.parameters.mode}}"
+
+          - name: submit-master
+            dependencies:
+              - config-creator
+            template: submit-master
+            arguments:
+              parameters:
+                - name: generated-config
+                  value: "{{tasks.config-creator.outputs.parameters.generated-config}}"
+
+    - name: config-creator
+      metadata:
+        labels:
+          pipeline_step: config-creator
+      inputs:
+        parameters:
+          - name: batch_id
+          - name: samples
+          - name: stage
+          - name: mode
+      container:
+        image: cr.yandex/crp5l1da4kinv8ofomr5/fastmri-students/bioops:k8s-demo-0be7b58
+        imagePullPolicy: Always
+        command:
+          - python3
+          - -c
+        args:
+          - |
+            import json
+
+            config = {
+                "batch_id": "{{inputs.parameters.batch_id}}",
+                "samples": "{{inputs.parameters.samples}}".split(","),
+                "stage": "{{inputs.parameters.stage}}",
+                "mode": "{{inputs.parameters.mode}}",
+                "namespace": "bioops-dev",
+            }
+
+            output_path = "/tmp/submit-master-config.json"
+
+            with open(output_path, "w", encoding="utf-8") as handle:
+                handle.write(json.dumps(config, separators=(",", ":")))
+
+            print("Config Creator completed")
+            print(json.dumps(config, indent=2))
+      outputs:
+        parameters:
+          - name: generated-config
+            valueFrom:
+              path: /tmp/submit-master-config.json
+
+    - name: submit-master
+      metadata:
+        labels:
+          pipeline_step: submit-master
+      inputs:
+        parameters:
+          - name: generated-config
+      container:
+        image: cr.yandex/crp5l1da4kinv8ofomr5/fastmri-students/bioops:k8s-demo-0be7b58
+        imagePullPolicy: Always
+        env:
+          - name: SUBMIT_MASTER_CONFIG
+            value: "{{inputs.parameters.generated-config}}"
+        command:
+          - python3
+          - -c
+        args:
+          - |
+            import json
+            import os
+            import time
+
+            config = json.loads(os.environ["SUBMIT_MASTER_CONFIG"])
+
+            required = {
+                "batch_id",
+                "samples",
+                "stage",
+                "mode",
+                "namespace",
+            }
+
+            missing = required - set(config)
+
+            if missing:
+                raise RuntimeError(
+                    f"Missing Submit Master fields: {sorted(missing)}"
+                )
+
+            print("Submit Master started")
+            print(json.dumps(config, indent=2))
+
+            time.sleep(5)
+
+            print(
+                "Submit Master demo completed successfully for "
+                + config["batch_id"]
+            )

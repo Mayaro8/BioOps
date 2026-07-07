@@ -34,7 +34,7 @@ spec:
             effect: NoSchedule
           containers:
           - name: batch-status-sync
-            image: cr.yandex/crp5l1da4kinv8ofomr5/fastmri-students/bioops:REPLACE_WITH_FINAL_TAG
+            image: cr.yandex/crp5l1da4kinv8ofomr5/fastmri-students/bioops:k8s-demo-0be7b58
             imagePullPolicy: Always
             command:
             - /bin/sh
