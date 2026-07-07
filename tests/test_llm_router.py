@@ -11,6 +11,8 @@ def test_default_allowed_agents_are_supported_agents():
         "review",
         "submit_master",
         "batch_status",
+        "storage",
+        "infra_cost",
     }
 
 

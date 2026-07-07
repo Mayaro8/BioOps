@@ -154,3 +154,61 @@ def test_supported_enabled_agents_are_returned():
     enabled = go.get_enabled_agent_names(config)
 
     assert enabled == {"general", "batch_status", "submit_master"}
+
+
+def test_storage_node_uses_bucket_agent(monkeypatch):
+    class FakeStorageAgent:
+        def run(self, message: str) -> str:
+            return f"storage:{message}"
+
+    monkeypatch.setattr(go, "storage_agent", FakeStorageAgent())
+
+    result = go.storage_node(
+        {
+            "message": "show bucket structure",
+            "selected_agent": "storage",
+            "response": "",
+        }
+    )
+
+    assert result["response"] == "storage:show bucket structure"
+
+
+def test_infra_cost_node_uses_infra_agent(monkeypatch):
+    class FakeInfraCostAgent:
+        def run(self, message: str) -> str:
+            return f"infra:{message}"
+
+    monkeypatch.setattr(go, "infra_cost_agent", FakeInfraCostAgent())
+
+    result = go.infra_cost_node(
+        {
+            "message": "show expensive VMs",
+            "selected_agent": "infra_cost",
+            "response": "",
+        }
+    )
+
+    assert result["response"] == "infra:show expensive VMs"
+
+
+def test_enabled_storage_and_infra_cost_agents_build_graph(monkeypatch):
+    config = {
+        "agents": {
+            "general": {"enabled": True},
+            "storage": {"enabled": True},
+            "infra_cost": {"enabled": True},
+        }
+    }
+
+    monkeypatch.setattr(go, "load_agents_config", lambda: config)
+    go.reset_orchestrator_cache()
+
+    graph = go.build_graph()
+
+    assert graph is not None
+    assert go.get_active_enabled_agent_names() == {
+        "general",
+        "storage",
+        "infra_cost",
+    }

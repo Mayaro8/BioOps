@@ -11,6 +11,8 @@ from bioops.agents.review_agent import ReviewAgent
 from bioops.agents.submit_master_agent import SubmitMasterAgent
 from bioops.tools.llm_router import LLMRouterTool
 from bioops.agents.batch_status_agent import BatchStatusAgent
+from bioops.agents.bucket_agent import BucketAgent
+from bioops.agents.infra_cost_agent import InfraCostAgent
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 AGENTS_CONFIG_PATH = PROJECT_ROOT / "configs" / "agents.yaml"
@@ -41,6 +43,8 @@ review_agent: ReviewAgent | None = None
 cluster_health_agent: ClusterHealthAgent | None = None
 submit_master_agent: SubmitMasterAgent | None = None
 batch_status_agent: BatchStatusAgent | None = None
+storage_agent: BucketAgent | None = None
+infra_cost_agent: InfraCostAgent | None = None
 
 
 _llm_router_tool: LLMRouterTool | None = None
@@ -115,6 +119,8 @@ def reset_orchestrator_cache() -> None:
     global _active_enabled_agent_names
     global graph
     global batch_status_agent
+    global storage_agent
+    global infra_cost_agent
 
     general_agent = None
     knowledge_agent = None
@@ -126,6 +132,8 @@ def reset_orchestrator_cache() -> None:
     _active_enabled_agent_names = None
     graph = None
     batch_status_agent = None
+    storage_agent = None
+    infra_cost_agent = None
 
 def get_general_agent() -> GeneralAgent:
     global general_agent
@@ -198,6 +206,20 @@ def get_batch_status_agent() -> BatchStatusAgent:
         batch_status_agent = BatchStatusAgent()
     return batch_status_agent
 
+def get_storage_agent() -> BucketAgent:
+    global storage_agent
+    if storage_agent is None:
+        storage_agent = BucketAgent()
+    return storage_agent
+
+
+def get_infra_cost_agent() -> InfraCostAgent:
+    global infra_cost_agent
+    if infra_cost_agent is None:
+        infra_cost_agent = InfraCostAgent()
+    return infra_cost_agent
+
+
 def route_after_router(state: BioOpsState) -> str:
     selected_agent = state.get("selected_agent", ROUTING_ERROR)
     if selected_agent in get_active_enabled_agent_names():
@@ -210,6 +232,14 @@ def general_node(state: BioOpsState) -> dict:
 
 def batch_status_node(state: BioOpsState) -> dict:
     return {"response": get_batch_status_agent().run(state["message"])}
+
+
+def storage_node(state: BioOpsState) -> dict:
+    return {"response": get_storage_agent().run(state["message"])}
+
+
+def infra_cost_node(state: BioOpsState) -> dict:
+    return {"response": get_infra_cost_agent().run(state["message"])}
 
 
 def knowledge_node(state: BioOpsState) -> dict:
@@ -262,6 +292,8 @@ def build_graph():
         "review": review_node,
         "submit_master": submit_master_node,
         "batch_status": batch_status_node,
+        "storage": storage_node,
+        "infra_cost": infra_cost_node,
     }
 
     graph_builder.add_node("router", router_node)
