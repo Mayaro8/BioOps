@@ -13,6 +13,8 @@ DEFAULT_ALLOWED_AGENTS = {
     "review",
     "submit_master",
     "batch_status",
+    "storage",
+    "infra_cost",
 }
 
 ALLOWED_AGENTS = DEFAULT_ALLOWED_AGENTS
@@ -140,6 +142,16 @@ class LLMRouterTool:
                 "stale batches, status DB records, CSV/JSON status export, or Google Sheet "
                 "batch status synchronization"
             ),
+            "storage": (
+                "Bucket and object-storage inventory questions: bucket structure, "
+                "object counts, total size, file types, storage classes, matching "
+                "files, prefixes, and inventory freshness"
+            ),
+            "infra_cost": (
+                "Infrastructure and cost monitoring: expensive or long-running "
+                "Compute Cloud VMs, projected VM cost, GPU runtime, infrastructure "
+                "cost alerts, database health, queues, and Cloud Functions"
+            ),
         }
 
         allowed_lines = "\n".join(
@@ -158,11 +170,26 @@ Rules:
 - Use full context, not single keywords.
 - Choose only one of the enabled agents listed above.
 - Do not choose an agent that is not listed above.
-- Choose submit_master for requests about Submit Master, Config Creator, SubmitMaster Argo workflows, D1/D2/D3/D4/D5, Submit Master progress, Submit Master failures, failed Submit Master pods, or safe retry/resubmission of Submit Master workflows.
-- Choose batch_status for requests about batch status records, latest batch status, failed/running/completed batches, or questions like "status of batch N".
-- Choose cluster_health for general Kubernetes pod or cluster health questions that are not specifically about Submit Master or batch status records.
-- Do not choose review only because the word "review" appears if the user is asking about health logs or documentation.
-- Do not choose knowledge only because the word "explain" appears; decide whether the explanation needs docs, cluster status, code review, Submit Master operation, batch status, or general response.
+- Choose submit_master for requests about Submit Master, Config Creator,
+  SubmitMaster Argo workflows, D1/D2/D3/D4/D5, Submit Master progress,
+  Submit Master failures, failed Submit Master pods, or safe
+  retry/resubmission of Submit Master workflows.
+- Choose batch_status for requests about batch status records, latest batch
+  status, failed/running/completed batches, or questions such as
+  "status of batch N".
+- Choose cluster_health for general Kubernetes pod or cluster health questions
+  that are not specifically about Submit Master or batch status records.
+- Choose storage for questions about bucket contents, object counts, file
+  sizes, prefixes, storage classes, or bucket inventory.
+- Choose infra_cost for Compute Cloud VM cost, expensive VMs, GPU runtime,
+  infrastructure cost alerts, database infrastructure, queues, or
+  Cloud Functions.
+- Do not choose review only because the word "review" appears when the user is
+  asking about health logs or documentation.
+- Do not choose knowledge only because the word "explain" appears; decide
+  whether the explanation needs docs, cluster status, code review,
+  Submit Master operation, batch status, storage, infra cost, or a general
+  response.
 - Return JSON only.
 
 JSON shape:

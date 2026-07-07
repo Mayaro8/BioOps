@@ -1,0 +1,65 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: bioops-infra-cost-monitor
+  namespace: bioops-dev
+  labels:
+    app: bioops
+    component: infra-cost-monitor
+    epic: e1
+spec:
+  # Keep inactive until the Infra Agent image tag is built and pushed.
+  suspend: true
+
+  # Run every 15 minutes.
+  schedule: "*/15 * * * *"
+
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 600
+
+      template:
+        metadata:
+          labels:
+            app: bioops
+            component: infra-cost-monitor
+            epic: e1
+
+        spec:
+          serviceAccountName: bioops-student
+          restartPolicy: Never
+
+          containers:
+            - name: infra-cost-monitor
+
+              # Replace this tag with the pushed Infra Agent image tag.
+              image: cr.yandex/crp5l1da4kinv8ofomr5/fastmri-students/bioops:replace-with-infra-agent-tag
+              imagePullPolicy: Always
+
+              command:
+                - python3
+                - -m
+                - bioops.jobs.infra_cost_monitor
+
+              env:
+                - name: PYTHONPATH
+                  value: /app/src
+
+                # Console mode prints alerts into the Kubernetes Job logs.
+                # Change to "bitrix" after configuring the Bitrix Secret.
+                - name: ALERT_CHANNEL
+                  value: console
+
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 128Mi
+                limits:
+                  cpu: 500m
+                  memory: 512Mi
