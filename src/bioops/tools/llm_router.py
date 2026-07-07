@@ -13,6 +13,7 @@ DEFAULT_ALLOWED_AGENTS = {
     "review",
     "submit_master",
     "batch_status",
+    "storage",
 }
 
 ALLOWED_AGENTS = DEFAULT_ALLOWED_AGENTS
@@ -134,7 +135,13 @@ class LLMRouterTool:
                 "D4 failed Submit Master pod or workflow-node reports, "
                 "D5 safe retry or resubmission of failed Submit Master workflows"
             ),
-            "batch_status": (
+            "storage": (
+            "Storage/Bucket Agent requests: genotek-testing bucket structure, "
+            "bucket prefixes/folders, object counts, object type breakdown, "
+            "total size of .bam/.vcf/.fastq files, folder size, prefix size, "
+            "S3 inventory, bucket listing, or inventory date"
+        ),
+        "batch_status": (
                 "Batch Status Agent requests: batch processing statuses, latest batch status, "
                 "status of a specific batch, failed batches, running batches, completed batches, "
                 "stale batches, status DB records, CSV/JSON status export, or Google Sheet "

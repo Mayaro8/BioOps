@@ -71,3 +71,13 @@ agents:
       spreadsheet_id: ''
       worksheet_name: batch_status
     db_path: /data/bioops_batch_status.sqlite3
+
+  storage:
+    enabled: true
+    description: Answers questions about the genotek-testing bucket structure, object counts, object types, and storage size from an inventory file.
+    bucket_name: genotek-testing
+    inventory_path: data/bucket_inventory.csv
+    inventory_date: '2026-07-01'
+    known_name_suffixes:
+      - imputation.vcf.gz
+      - beagle.imputation.vcf.gz

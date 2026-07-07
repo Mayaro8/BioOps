@@ -4,13 +4,15 @@ from typing import Any, TypedDict
 import yaml
 from langgraph.graph import END, StateGraph
 
+from bioops.agents.batch_status_agent import BatchStatusAgent
+from bioops.agents.bucket_agent import BucketAgent
 from bioops.agents.cluster_health_agent import ClusterHealthAgent
 from bioops.agents.general_agent import GeneralAgent
 from bioops.agents.knowledge_agent import KnowledgeAgent
 from bioops.agents.review_agent import ReviewAgent
 from bioops.agents.submit_master_agent import SubmitMasterAgent
 from bioops.tools.llm_router import LLMRouterTool
-from bioops.agents.batch_status_agent import BatchStatusAgent
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 AGENTS_CONFIG_PATH = PROJECT_ROOT / "configs" / "agents.yaml"
@@ -25,6 +27,7 @@ SUPPORTED_AGENTS = {
     "storage",
     "infra_cost",
 }
+
 MANDATORY_AGENTS = {"general"}
 ROUTING_ERROR = "routing_error"
 
@@ -41,12 +44,11 @@ review_agent: ReviewAgent | None = None
 cluster_health_agent: ClusterHealthAgent | None = None
 submit_master_agent: SubmitMasterAgent | None = None
 batch_status_agent: BatchStatusAgent | None = None
-
+storage_agent: BucketAgent | None = None
 
 _llm_router_tool: LLMRouterTool | None = None
 llm_router_tool: Any | None = None
 _active_enabled_agent_names: set[str] | None = None
-
 graph = None
 
 
@@ -104,62 +106,92 @@ def get_llm_router_tool(enabled_agent_names: set[str] | None = None) -> LLMRoute
 
 def reset_orchestrator_cache() -> None:
     """Reset lazy runtime objects. Mainly useful for tests."""
-
     global general_agent
     global knowledge_agent
     global review_agent
     global cluster_health_agent
     global submit_master_agent
+    global batch_status_agent
+    global storage_agent
     global _llm_router_tool
     global llm_router_tool
     global _active_enabled_agent_names
     global graph
-    global batch_status_agent
 
     general_agent = None
     knowledge_agent = None
     review_agent = None
     cluster_health_agent = None
     submit_master_agent = None
+    batch_status_agent = None
+    storage_agent = None
     _llm_router_tool = None
     llm_router_tool = None
     _active_enabled_agent_names = None
     graph = None
-    batch_status_agent = None
+
 
 def get_general_agent() -> GeneralAgent:
     global general_agent
+
     if general_agent is None:
         general_agent = GeneralAgent()
+
     return general_agent
 
 
 def get_knowledge_agent() -> KnowledgeAgent:
     global knowledge_agent
+
     if knowledge_agent is None:
         knowledge_agent = KnowledgeAgent()
+
     return knowledge_agent
 
 
 def get_review_agent() -> ReviewAgent:
     global review_agent
+
     if review_agent is None:
         review_agent = ReviewAgent()
+
     return review_agent
 
 
 def get_cluster_health_agent() -> ClusterHealthAgent:
     global cluster_health_agent
+
     if cluster_health_agent is None:
         cluster_health_agent = ClusterHealthAgent()
+
     return cluster_health_agent
 
 
 def get_submit_master_agent() -> SubmitMasterAgent:
     global submit_master_agent
+
     if submit_master_agent is None:
         submit_master_agent = SubmitMasterAgent()
+
     return submit_master_agent
+
+
+def get_batch_status_agent() -> BatchStatusAgent:
+    global batch_status_agent
+
+    if batch_status_agent is None:
+        batch_status_agent = BatchStatusAgent()
+
+    return batch_status_agent
+
+
+def get_storage_agent() -> BucketAgent:
+    global storage_agent
+
+    if storage_agent is None:
+        storage_agent = BucketAgent()
+
+    return storage_agent
 
 
 def router_node(state: BioOpsState) -> dict:
@@ -170,7 +202,6 @@ def router_node(state: BioOpsState) -> dict:
     No keyword fallback is used. If the LLM router is unavailable, invalid,
     or misconfigured, return a clear routing error instead of guessing.
     """
-
     enabled_agent_names = get_active_enabled_agent_names()
 
     try:
@@ -182,6 +213,7 @@ def router_node(state: BioOpsState) -> dict:
         }
 
     selected_agent = decision.agent
+
     if selected_agent not in enabled_agent_names:
         return {
             "selected_agent": ROUTING_ERROR,
@@ -192,24 +224,26 @@ def router_node(state: BioOpsState) -> dict:
 
     return {"selected_agent": selected_agent, "response": ""}
 
-def get_batch_status_agent() -> BatchStatusAgent:
-    global batch_status_agent
-    if batch_status_agent is None:
-        batch_status_agent = BatchStatusAgent()
-    return batch_status_agent
 
 def route_after_router(state: BioOpsState) -> str:
     selected_agent = state.get("selected_agent", ROUTING_ERROR)
+
     if selected_agent in get_active_enabled_agent_names():
         return selected_agent
+
     return ROUTING_ERROR
 
 
 def general_node(state: BioOpsState) -> dict:
     return {"response": get_general_agent().run(state["message"])}
 
+
 def batch_status_node(state: BioOpsState) -> dict:
     return {"response": get_batch_status_agent().run(state["message"])}
+
+
+def storage_node(state: BioOpsState) -> dict:
+    return {"response": get_storage_agent().run(state["message"])}
 
 
 def knowledge_node(state: BioOpsState) -> dict:
@@ -262,22 +296,31 @@ def build_graph():
         "review": review_node,
         "submit_master": submit_master_node,
         "batch_status": batch_status_node,
+        "storage": storage_node,
     }
 
     graph_builder.add_node("router", router_node)
     graph_builder.add_node(ROUTING_ERROR, routing_error_node)
 
     for agent_name in sorted(enabled_agent_names):
+        if agent_name not in agent_nodes:
+            continue
         graph_builder.add_node(agent_name, agent_nodes[agent_name])
 
     graph_builder.set_entry_point("router")
 
-    route_map = {agent_name: agent_name for agent_name in sorted(enabled_agent_names)}
+    route_map = {
+        agent_name: agent_name
+        for agent_name in sorted(enabled_agent_names)
+        if agent_name in agent_nodes
+    }
     route_map[ROUTING_ERROR] = ROUTING_ERROR
 
     graph_builder.add_conditional_edges("router", route_after_router, route_map)
 
     for agent_name in sorted(enabled_agent_names):
+        if agent_name not in agent_nodes:
+            continue
         graph_builder.add_edge(agent_name, END)
 
     graph_builder.add_edge(ROUTING_ERROR, END)
@@ -287,8 +330,10 @@ def build_graph():
 
 def get_graph():
     global graph
+
     if graph is None:
         graph = build_graph()
+
     return graph
 
 
@@ -300,4 +345,5 @@ def run_graph(message: str) -> str:
             "response": "",
         }
     )
+
     return result.get("response", "")

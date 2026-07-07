@@ -11,6 +11,7 @@ def test_default_allowed_agents_are_supported_agents():
         "review",
         "submit_master",
         "batch_status",
+        "storage",
     }
 
 
@@ -111,3 +112,23 @@ def test_prompt_contains_batch_status_guidance():
     assert "latest batch status" in prompt
     assert "failed batches" in prompt
     assert '"agent": "batch_status|general"' in prompt
+
+
+def test_parse_storage_router_json():
+    tool = LLMRouterTool()
+    decision = tool._parse_response(
+        '{"agent": "storage", "reason": "User asks about bucket size."}'
+    )
+
+    assert decision.agent == "storage"
+    assert decision.reason == "User asks about bucket size."
+
+
+def test_prompt_contains_storage_guidance():
+    tool = LLMRouterTool(allowed_agents={"general", "storage"})
+    prompt = tool._build_prompt("total size of .bam files in genotek-testing")
+
+    assert "- storage:" in prompt
+    assert "bucket" in prompt
+    assert ".bam" in prompt
+    assert '"agent": "general|storage"' in prompt

@@ -1,0 +1,8 @@
+key,size,last_modified,storage_class,inventory_date
+raw/batch-001/sample-001.bam,19,2026-07-06T11:34:22.681000+00:00,STANDARD,2026-07-06
+raw/batch-001/sample-001.bam.bai,17,2026-07-06T11:34:22.707000+00:00,STANDARD,2026-07-06
+raw/batch-001/sample-002.bam,19,2026-07-06T11:34:22.738000+00:00,STANDARD,2026-07-06
+raw/batch-002/sample-003.fastq.gz,19,2026-07-06T11:34:22.765000+00:00,STANDARD,2026-07-06
+reports/batch-001/qc_report.json,16,2026-07-06T11:34:22.855000+00:00,STANDARD,2026-07-06
+results/batch-001/sample-001.gvcf.gz,18,2026-07-06T11:34:22.792000+00:00,STANDARD,2026-07-06
+results/batch-001/sample-001.vcf.gz,17,2026-07-06T11:34:22.825000+00:00,STANDARD,2026-07-06

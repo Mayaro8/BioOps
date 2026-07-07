@@ -66,6 +66,22 @@ def test_router_uses_llm_selected_submit_master(monkeypatch):
     assert result["selected_agent"] == "submit_master"
 
 
+
+
+def test_router_uses_llm_selected_storage(monkeypatch):
+    monkeypatch.setattr(go, "llm_router_tool", FakeRouter("storage"))
+
+    result = go.router_node(
+        {
+            "message": "total size of .bam files in genotek-testing",
+            "selected_agent": "",
+            "response": "",
+        }
+    )
+
+    assert result["selected_agent"] == "storage"
+
+
 def test_router_failure_returns_routing_error_not_general(monkeypatch):
     monkeypatch.setattr(go, "llm_router_tool", FailingRouter())
 
@@ -153,4 +169,4 @@ def test_unsupported_agents_are_ignored():
 
     enabled = go.get_enabled_agent_names(config)
 
-    assert enabled == {"general", "submit_master"}
+    assert enabled == {"general", "batch_status", "submit_master"}

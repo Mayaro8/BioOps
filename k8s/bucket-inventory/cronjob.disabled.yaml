@@ -1,0 +1,102 @@
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: bioops-bucket-inventory
+  namespace: bioops-dev
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 1Gi
+
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: bioops-bucket-inventory-exporter
+  namespace: bioops-dev
+  labels:
+    app: bioops
+    component: bucket-inventory-exporter
+spec:
+  # Inactive by default.
+  # Change to false when the real image, secret, PVC, and endpoint are confirmed.
+  suspend: true
+
+  # Daily refresh at 03:00 UTC.
+  schedule: "0 3 * * *"
+
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app: bioops
+            component: bucket-inventory-exporter
+        spec:
+          restartPolicy: Never
+
+          containers:
+            - name: bucket-inventory-exporter
+              # TODO: replace before activation with the real Yandex Container Registry image.
+              # Example:
+              # image: cr.yandex/<registry>/<repo>/bioops:<tag>
+              image: REPLACE_WITH_YC_BIOOPS_IMAGE_TAG
+              imagePullPolicy: IfNotPresent
+
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -euo pipefail
+
+                  mkdir -p /data/inventories
+
+                  export BUCKET_INVENTORY_PATH="/data/inventories/bucket_inventory_$(date -u +%Y-%m-%d).csv"
+
+                  echo "Writing bucket inventory to ${BUCKET_INVENTORY_PATH}"
+
+                  python -m bioops.jobs.export_bucket_inventory
+
+              env:
+                # MinIO/S3-compatible endpoint.
+                # For local/dev MinIO inside Kubernetes, replace this with the actual Service DNS name.
+                # For Yandex Object Storage, use: https://storage.yandexcloud.net
+                - name: S3_ENDPOINT_URL
+                  value: "http://minio:9000"
+
+                - name: BUCKET_NAME
+                  value: "genotek-testing"
+
+                # Optional prefix. Leave empty to export the whole bucket listing.
+                - name: BUCKET_PREFIX
+                  value: ""
+
+                # Placeholder Secret. Create this Secret before activation.
+                - name: S3_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: bioops-s3-secret-placeholder
+                      key: S3_ACCESS_KEY_ID
+
+                - name: S3_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: bioops-s3-secret-placeholder
+                      key: S3_SECRET_ACCESS_KEY
+
+              volumeMounts:
+                - name: bucket-inventory
+                  mountPath: /data
+
+          volumes:
+            - name: bucket-inventory
+              persistentVolumeClaim:
+                claimName: bioops-bucket-inventory
