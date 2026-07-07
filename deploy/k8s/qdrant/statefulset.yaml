@@ -1,0 +1,81 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: qdrant
+  namespace: bioops-dev
+  labels:
+    app: qdrant
+    app.kubernetes.io/part-of: bioops
+spec:
+  serviceName: qdrant
+  replicas: 1
+
+  selector:
+    matchLabels:
+      app: qdrant
+
+  template:
+    metadata:
+      labels:
+        app: qdrant
+        app.kubernetes.io/part-of: bioops
+    spec:
+      # Required by the project deployment specification.
+      # This currently matches none of the active nodes and must be
+      # confirmed with the cluster administrator before deployment.
+      nodeSelector:
+        genoteknodetype: fastmri-cpu
+
+      tolerations:
+        - key: yandex.cloud/preemptible
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
+
+      terminationGracePeriodSeconds: 60
+
+      containers:
+        - name: qdrant
+          # Preserved from the existing BioOps manifest for now.
+          # Pin to a tested version before the final release.
+          image: qdrant/qdrant:latest
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - name: http
+              containerPort: 6333
+            - name: grpc
+              containerPort: 6334
+
+          readinessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 6
+
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 2
+            failureThreshold: 6
+
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1"
+              memory: "2Gi"
+
+          volumeMounts:
+            - name: qdrant-data
+              mountPath: /qdrant/storage
+
+      volumes:
+        - name: qdrant-data
+          persistentVolumeClaim:
+            claimName: qdrant-data

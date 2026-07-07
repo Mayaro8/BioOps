@@ -1,0 +1,93 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: bioops-knowledge-ingest
+  namespace: bioops-dev
+  labels:
+    app.kubernetes.io/name: bioops-knowledge-ingest
+    app.kubernetes.io/part-of: bioops
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 1800
+  ttlSecondsAfterFinished: 86400
+
+  template:
+    metadata:
+      labels:
+        app: bioops-knowledge-ingest
+        app.kubernetes.io/part-of: bioops
+    spec:
+      serviceAccountName: bioops-student
+      restartPolicy: Never
+
+      nodeSelector:
+        genoteknodetype: fastmri-cpu
+
+      tolerations:
+        - key: yandex.cloud/preemptible
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
+
+      containers:
+        - name: ingest
+          image: cr.yandex/crp5l1da4kinv8ofomr5/fastmri-students/bioops:REPLACE_WITH_FINAL_TAG
+          imagePullPolicy: Always
+          workingDir: /app
+
+          command:
+            - /bin/sh
+            - -ec
+
+          args:
+            - |
+              echo "Waiting for Qdrant at ${QDRANT_URL}"
+
+              qdrant_ready=0
+
+              for attempt in $(seq 1 60); do
+                if curl -fsS "${QDRANT_URL}/readyz" >/dev/null; then
+                  qdrant_ready=1
+                  break
+                fi
+
+                echo "Qdrant not ready: attempt ${attempt}/60"
+                sleep 5
+              done
+
+              if [ "${qdrant_ready}" -ne 1 ]; then
+                echo "Qdrant did not become ready"
+                exit 1
+              fi
+
+              echo "Checking knowledge source files"
+
+              test -d /app/docs
+
+              find /app/docs -type f \
+                \( -name '*.md' \
+                -o -name '*.txt' \
+                -o -name '*.yaml' \
+                -o -name '*.yml' \
+                -o -name '*.pdf' \) \
+                -print
+
+              echo "Starting Knowledge ingestion"
+
+              python3 -m bioops.rag.ingest
+
+              echo "Knowledge ingestion completed successfully"
+
+          envFrom:
+            - configMapRef:
+                name: bioops-config
+            - secretRef:
+                name: bioops-secrets
+
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1"
+              memory: "2Gi"

@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: bioops-batch-status-db
+  namespace: bioops-dev
+  labels:
+    app.kubernetes.io/name: batch-status
+    app.kubernetes.io/part-of: bioops
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi

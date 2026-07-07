@@ -1,0 +1,37 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: bioops-submit-master-local
+  namespace: bioops-dev
+  labels:
+    app.kubernetes.io/name: bioops
+    app.kubernetes.io/component: submit-master
+spec:
+  serviceAccountName: bioops-student
+  entrypoint: submit-master-demo
+
+  nodeSelector:
+    genoteknodetype: fastmri-cpu
+
+  tolerations:
+    - key: yandex.cloud/preemptible
+      operator: Equal
+      value: "true"
+      effect: NoSchedule
+
+  arguments:
+    parameters:
+      - name: batch_id
+        value: batch-demo-001
+      - name: samples
+        value: sample1,sample2
+      - name: stage
+        value: "2"
+YAML        )   f"{config['batch_id']}"pleted successfully for ": {sorted(missing)}"INAL_TAG
+(.venv) mayar@stud1:~/bio-ops$ cat > deploy/argo/kustomization.yaml <<'YAML'
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - knowledge-ingest-template.yaml
+  - submit-master-template.yaml

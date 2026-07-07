@@ -1,0 +1,111 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bioops-api
+  namespace: bioops-dev
+  labels:
+    app: bioops-api
+    app.kubernetes.io/name: bioops-api
+    app.kubernetes.io/part-of: bioops
+spec:
+  replicas: 1
+
+  selector:
+    matchLabels:
+      app: bioops-api
+
+  strategy:
+    type: RollingUpdate
+
+  template:
+    metadata:
+      labels:
+        app: bioops-api
+        app.kubernetes.io/name: bioops-api
+        app.kubernetes.io/part-of: bioops
+    spec:
+      serviceAccountName: bioops-student
+
+      nodeSelector:
+        genoteknodetype: fastmri-cpu
+
+      tolerations:
+        - key: yandex.cloud/preemptible
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
+
+      containers:
+        - name: bioops-api
+          image: cr.yandex/crp5l1da4kinv8ofomr5/fastmri-students/bioops:REPLACE_WITH_FINAL_TAG
+          imagePullPolicy: Always
+
+          command:
+            - python
+            - -m
+            - uvicorn
+
+          args:
+            - bioops.api.bitrix_app:app
+            - --host
+            - 0.0.0.0
+            - --port
+            - "8000"
+
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+
+          envFrom:
+            - configMapRef:
+                name: bioops-config
+            - secretRef:
+                name: bioops-secrets
+
+          startupProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 5
+            failureThreshold: 30
+
+          readinessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 2
+            failureThreshold: 3
+
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1"
+              memory: "2Gi"
+
+          volumeMounts:
+            - name: agents-config
+              mountPath: /app/configs/agents.yaml
+              subPath: agents.yaml
+              readOnly: true
+
+            - name: batch-status-db
+              mountPath: /data
+
+      volumes:
+        - name: agents-config
+          configMap:
+            name: bioops-agents-config
+
+        - name: batch-status-db
+          persistentVolumeClaim:
+            claimName: bioops-batch-status-db

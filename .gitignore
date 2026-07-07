@@ -231,3 +231,4 @@ k8s/argo/company/
 *.bak
 __pycache__/
 *.pyc
+deploy/k8s/config/secret.env

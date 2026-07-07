@@ -1,0 +1,18 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: bioops-dev
+
+configMapGenerator:
+  - name: bioops-config
+    envs:
+      - runtime.env
+
+  - name: bioops-agents-config
+    files:
+      - agents.yaml
+
+generatorOptions:
+  disableNameSuffixHash: true
+  labels:
+    app.kubernetes.io/part-of: bioops

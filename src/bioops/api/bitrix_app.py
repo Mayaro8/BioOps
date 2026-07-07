@@ -1,67 +1,394 @@
-from fastapi import FastAPI, Request
+from __future__ import annotations
+
+import json
+import logging
+from typing import Any
+from urllib.parse import parse_qs
+
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse
+from pydantic import BaseModel
 
 from bioops.graph_orchestrator import run_graph
 from bioops.tools.bitrix_sender import BitrixSender
 
 
-app = FastAPI(title="BioOps Bitrix API")
-sender = BitrixSender()
+logger = logging.getLogger(__name__)
+
+app = FastAPI(
+    title="BioOps API",
+    description="Web chat and optional Bitrix adapter for BioOps agents.",
+)
+
+bitrix_sender = BitrixSender()
+
+
+class ChatRequest(BaseModel):
+    message: str
+
+
+class ChatResponse(BaseModel):
+    ok: bool
+    message: str
+    answer: str
+
+
+CHAT_PAGE = """
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BioOps Chat</title>
+
+  <style>
+    :root {
+      color-scheme: light dark;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    body {
+      margin: 0;
+      background: #111827;
+      color: #f9fafb;
+    }
+
+    main {
+      width: min(900px, calc(100% - 32px));
+      margin: 32px auto;
+    }
+
+    h1 {
+      margin-bottom: 4px;
+    }
+
+    .subtitle {
+      margin-top: 0;
+      color: #9ca3af;
+    }
+
+    #messages {
+      min-height: 420px;
+      max-height: 65vh;
+      overflow-y: auto;
+      padding: 16px;
+      border: 1px solid #374151;
+      border-radius: 12px;
+      background: #1f2937;
+    }
+
+    .message {
+      margin: 12px 0;
+      padding: 12px 14px;
+      border-radius: 10px;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .user {
+      margin-left: 15%;
+      background: #1d4ed8;
+    }
+
+    .assistant {
+      margin-right: 15%;
+      background: #374151;
+    }
+
+    .error {
+      background: #7f1d1d;
+    }
+
+    form {
+      display: flex;
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    textarea {
+      flex: 1;
+      min-height: 54px;
+      resize: vertical;
+      padding: 12px;
+      border: 1px solid #4b5563;
+      border-radius: 10px;
+      font: inherit;
+    }
+
+    button {
+      min-width: 100px;
+      border: 0;
+      border-radius: 10px;
+      padding: 0 18px;
+      background: #2563eb;
+      color: white;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    button:disabled {
+      cursor: wait;
+      opacity: 0.6;
+    }
+  </style>
+</head>
+
+<body>
+  <main>
+    <h1>BioOps Chat</h1>
+    <p class="subtitle">
+      Ask about workflows, batches, cluster health, storage, documentation, or code review.
+    </p>
+
+    <section id="messages" aria-live="polite">
+      <div class="message assistant">
+        BioOps is ready. Enter a question below.
+      </div>
+    </section>
+
+    <form id="chat-form">
+      <textarea
+        id="message-input"
+        name="message"
+        placeholder="Example: Show failed batches"
+        required
+      ></textarea>
+
+      <button id="send-button" type="submit">Send</button>
+    </form>
+  </main>
+
+  <script>
+    const form = document.getElementById("chat-form");
+    const input = document.getElementById("message-input");
+    const messages = document.getElementById("messages");
+    const button = document.getElementById("send-button");
+
+    function addMessage(text, className) {
+      const element = document.createElement("div");
+      element.className = `message ${className}`;
+      element.textContent = text;
+      messages.appendChild(element);
+      messages.scrollTop = messages.scrollHeight;
+    }
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+
+      const message = input.value.trim();
+
+      if (!message) {
+        return;
+      }
+
+      addMessage(message, "user");
+      input.value = "";
+      button.disabled = true;
+      button.textContent = "Working...";
+
+      try {
+        const response = await fetch("/chat", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ message })
+        });
+
+        const payload = await response.json();
+
+        if (!response.ok) {
+          throw new Error(payload.detail || "BioOps request failed");
+        }
+
+        addMessage(payload.answer, "assistant");
+      } catch (error) {
+        addMessage(String(error), "error");
+      } finally {
+        button.disabled = false;
+        button.textContent = "Send";
+        input.focus();
+      }
+    });
+
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        form.requestSubmit();
+      }
+    });
+  </script>
+</body>
+</html>
+"""
+
+
+@app.get("/", response_class=HTMLResponse)
+def chat_page() -> str:
+    return CHAT_PAGE
 
 
 @app.get("/health")
-def health():
+def health() -> dict[str, str]:
     return {
         "status": "ok",
-        "service": "bioops-bitrix",
+        "service": "bioops-api",
     }
 
 
-def extract_message(data: dict) -> str:
-    return (
-        data.get("message")
-        or data.get("MESSAGE")
-        or data.get("text")
-        or data.get("TEXT")
-        or data.get("PARAMS", {}).get("MESSAGE")
-        or data.get("event", {}).get("text")
-        or ""
+def process_message(message: str) -> str:
+    clean_message = message.strip()
+
+    if not clean_message:
+        raise ValueError("Message cannot be empty.")
+
+    return run_graph(clean_message)
+
+
+@app.post("/chat", response_model=ChatResponse)
+def chat(payload: ChatRequest) -> ChatResponse:
+    message = payload.message.strip()
+
+    if not message:
+        raise HTTPException(
+            status_code=400,
+            detail="Message cannot be empty.",
+        )
+
+    try:
+        answer = process_message(message)
+    except Exception:
+        logger.exception("BioOps failed while processing a chat message.")
+        raise HTTPException(
+            status_code=500,
+            detail="BioOps failed while processing the message.",
+        ) from None
+
+    return ChatResponse(
+        ok=True,
+        message=message,
+        answer=answer,
     )
 
 
-def extract_chat_id(data: dict) -> str | None:
-    return (
-        data.get("chat_id")
-        or data.get("DIALOG_ID")
-        or data.get("dialog_id")
-        or data.get("PARAMS", {}).get("DIALOG_ID")
-        or data.get("event", {}).get("dialog_id")
-        or None
+def nested_value(data: dict[str, Any], *keys: str) -> Any:
+    current: Any = data
+
+    for key in keys:
+        if not isinstance(current, dict):
+            return None
+
+        current = current.get(key)
+
+    return current
+
+
+def first_text(*values: Any) -> str:
+    for value in values:
+        if value is None or isinstance(value, (dict, list, tuple, set)):
+            continue
+
+        text = str(value).strip()
+
+        if text:
+            return text
+
+    return ""
+
+
+def extract_message(data: dict[str, Any]) -> str:
+    return first_text(
+        data.get("data[message][text]"),
+        nested_value(data, "data", "message", "text"),
+        data.get("message"),
+        data.get("MESSAGE"),
+        data.get("text"),
+        data.get("TEXT"),
+        nested_value(data, "PARAMS", "MESSAGE"),
+        nested_value(data, "event", "text"),
     )
+
+
+def extract_chat_id(data: dict[str, Any]) -> str | None:
+    chat_id = first_text(
+        data.get("data[chat][dialogId]"),
+        data.get("data[message][chatId]"),
+        nested_value(data, "data", "chat", "dialogId"),
+        nested_value(data, "data", "message", "chatId"),
+        data.get("chat_id"),
+        data.get("DIALOG_ID"),
+        data.get("dialog_id"),
+        nested_value(data, "PARAMS", "DIALOG_ID"),
+        nested_value(data, "event", "dialog_id"),
+    )
+
+    return chat_id or None
+
+
+async def read_request_payload(request: Request) -> dict[str, Any]:
+    body = await request.body()
+
+    if not body:
+        return {}
+
+    content_type = request.headers.get("content-type", "").lower()
+
+    if "application/json" in content_type:
+        try:
+            payload = json.loads(body)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return {}
+
+        return payload if isinstance(payload, dict) else {}
+
+    try:
+        parsed = parse_qs(
+            body.decode("utf-8"),
+            keep_blank_values=True,
+        )
+    except UnicodeDecodeError:
+        return {}
+
+    return {
+        key: values[-1] if values else ""
+        for key, values in parsed.items()
+    }
 
 
 @app.post("/bitrix/message")
-async def bitrix_message(request: Request):
-    data = await request.json()
+async def bitrix_message(request: Request) -> dict[str, Any]:
+    data = await read_request_payload(request)
 
-    message = extract_message(data).strip()
+    message = extract_message(data)
     chat_id = extract_chat_id(data)
 
     if not message:
         answer = "BioOps received an empty message."
     else:
         try:
-            answer = run_graph(message)
+            answer = process_message(message)
         except Exception as error:
+            logger.exception("BioOps failed while processing a Bitrix message.")
             answer = (
                 "BioOps failed while processing your message.\n\n"
                 f"Error: {type(error).__name__}: {error}"
             )
 
-    sender.send_message(text=answer, chat_id=chat_id)
+    delivered = False
+
+    try:
+        bitrix_sender.send_message(
+            text=answer,
+            chat_id=chat_id,
+        )
+        delivered = True
+    except Exception:
+        logger.exception("Could not send the BioOps response to Bitrix.")
 
     return {
         "ok": True,
         "received": message,
         "chat_id": chat_id,
         "answer": answer,
+        "delivered_to_bitrix": delivered,
     }

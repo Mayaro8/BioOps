@@ -1,0 +1,12 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: bioops-ingest-ci-
+  namespace: bioops-dev
+  labels:
+    app.kubernetes.io/name: bioops-ingest-ci
+    app.kubernetes.io/part-of: bioops
+spec:
+  serviceAccountName: bioops-student
+  workflowTemplateRef:
+    name: bioops-knowledge-ingest
