@@ -141,7 +141,7 @@ def test_general_is_mandatory_even_if_disabled():
     assert enabled == {"general"}
 
 
-def test_unsupported_agents_are_ignored():
+def test_supported_enabled_agents_are_returned():
     config = {
         "agents": {
             "general": {"enabled": True},
@@ -153,4 +153,4 @@ def test_unsupported_agents_are_ignored():
 
     enabled = go.get_enabled_agent_names(config)
 
-    assert enabled == {"general", "submit_master"}
+    assert enabled == {"general", "batch_status", "submit_master"}
