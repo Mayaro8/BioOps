@@ -8,6 +8,7 @@ from bioops.agents.batch_status_agent import BatchStatusAgent
 from bioops.agents.bucket_agent import BucketAgent
 from bioops.agents.cluster_health_agent import ClusterHealthAgent
 from bioops.agents.general_agent import GeneralAgent
+from bioops.agents.infra_cost_agent import InfraCostAgent
 from bioops.agents.knowledge_agent import KnowledgeAgent
 from bioops.agents.review_agent import ReviewAgent
 from bioops.agents.submit_master_agent import SubmitMasterAgent
@@ -24,6 +25,7 @@ SUPPORTED_AGENTS = {
     "batch_status",
     "submit_master",
     "storage",
+    "infra_cost",
 }
 MANDATORY_AGENTS = {"general"}
 ROUTING_ERROR = "routing_error"
@@ -42,6 +44,7 @@ cluster_health_agent: ClusterHealthAgent | None = None
 submit_master_agent: SubmitMasterAgent | None = None
 batch_status_agent: BatchStatusAgent | None = None
 storage_agent: BucketAgent | None = None
+infra_cost_agent: InfraCostAgent | None = None
 _llm_router_tool: LLMRouterTool | None = None
 llm_router_tool: Any | None = None
 _active_enabled_agent_names: set[str] | None = None
@@ -101,6 +104,7 @@ def reset_orchestrator_cache() -> None:
     global submit_master_agent
     global batch_status_agent
     global storage_agent
+    global infra_cost_agent
     global _llm_router_tool
     global llm_router_tool
     global _active_enabled_agent_names
@@ -113,6 +117,7 @@ def reset_orchestrator_cache() -> None:
     submit_master_agent = None
     batch_status_agent = None
     storage_agent = None
+    infra_cost_agent = None
     _llm_router_tool = None
     llm_router_tool = None
     _active_enabled_agent_names = None
@@ -166,6 +171,13 @@ def get_storage_agent() -> BucketAgent:
     if storage_agent is None:
         storage_agent = BucketAgent()
     return storage_agent
+
+
+def get_infra_cost_agent() -> InfraCostAgent:
+    global infra_cost_agent
+    if infra_cost_agent is None:
+        infra_cost_agent = InfraCostAgent()
+    return infra_cost_agent
 
 
 def router_node(state: BioOpsState) -> dict:
@@ -223,6 +235,10 @@ def storage_node(state: BioOpsState) -> dict:
     return {"response": get_storage_agent().run(state["message"])}
 
 
+def infra_cost_node(state: BioOpsState) -> dict:
+    return {"response": get_infra_cost_agent().run(state["message"])}
+
+
 def routing_error_node(state: BioOpsState) -> dict:
     return {
         "response": state.get("response")
@@ -257,6 +273,7 @@ def build_graph():
         "submit_master": submit_master_node,
         "batch_status": batch_status_node,
         "storage": storage_node,
+        "infra_cost": infra_cost_node,
     }
 
     missing_nodes = enabled_agent_names - set(agent_nodes)

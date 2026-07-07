@@ -14,6 +14,7 @@ DEFAULT_ALLOWED_AGENTS = {
     "submit_master",
     "batch_status",
     "storage",
+    "infra_cost",
 }
 ALLOWED_AGENTS = DEFAULT_ALLOWED_AGENTS
 
@@ -134,6 +135,11 @@ class LLMRouterTool:
                 "Bucket Agent inventory questions: object count, size, prefixes, files, "
                 "extensions, filename suffixes, storage classes, and inventory freshness"
             ),
+            "infra_cost": (
+                "Infrastructure and cost monitoring: expensive or long-running "
+                "Compute Cloud VMs, projected VM cost, GPU runtime, infrastructure "
+                "cost alerts, database health, queues, and Cloud Functions"
+            ),
         }
         allowed_lines = "\n".join(
             f"- {agent}: {agent_descriptions[agent]}"
@@ -154,6 +160,8 @@ Rules:
 - Choose submit_master for SubmitMaster Argo progress, failures, UI, or retry guidance.
 - Choose batch_status for persisted batch records, including completed and stale batches.
 - Choose cluster_health for general Kubernetes health not owned by SubmitMaster.
+- Choose infra_cost for Compute Cloud VM cost, expensive VMs, GPU runtime,
+  infrastructure cost alerts, database infrastructure, queues, or Cloud Functions.
 - Return JSON only.
 
 JSON shape:
