@@ -4,3 +4,20 @@ kind: Kustomization
 resources:
   - deployment.yaml
   - service.yaml
+  - caddy-pvc.yaml
+
+configMapGenerator:
+  - name: bioops-caddy-config
+    files:
+      - Caddyfile
+
+patches:
+  - path: deployment-caddy-patch.yaml
+    target:
+      kind: Deployment
+      name: bioops-api
+
+  - path: service-caddy-patch.yaml
+    target:
+      kind: Service
+      name: bioops-api

@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bioops-api
+  namespace: bioops-dev
+spec:
+  strategy:
+    type: Recreate
+    rollingUpdate: null
+  template:
+    spec:
+      containers:
+        - name: caddy
+          image: caddy:2-alpine
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: BIOOPS_HOST
+              value: bioops.84-201-181-221.sslip.io
+            - name: BIOOPS_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: bioops-edge-auth
+                  key: username
+            - name: BIOOPS_PASSWORD_HASH
+              valueFrom:
+                secretKeyRef:
+                  name: bioops-edge-auth
+                  key: password-hash
+          ports:
+            - name: http
+              containerPort: 80
+            - name: https
+              containerPort: 443
+          volumeMounts:
+            - name: caddy-config
+              mountPath: /etc/caddy/Caddyfile
+              subPath: Caddyfile
+              readOnly: true
+            - name: caddy-data
+              mountPath: /data
+      volumes:
+        - name: caddy-config
+          configMap:
+            name: bioops-caddy-config
+        - name: caddy-data
+          persistentVolumeClaim:
+            claimName: bioops-caddy-data

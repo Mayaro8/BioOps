@@ -11,6 +11,14 @@ class ETAReport:
     remaining_minutes: float | None
     note: str
 
+    @property
+    def pipeline_step(self) -> str:
+        return self.step_name
+
+    @property
+    def source(self) -> str:
+        return self.note
+
 
 class ETATool:
     """Estimate ETA for running Kubernetes pods using configured step runtimes."""
