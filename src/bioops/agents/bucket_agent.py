@@ -6,8 +6,11 @@ from typing import Any
 
 import yaml
 
-from bioops.tools.bucket_inventory import BucketInventoryTool
-from bioops.tools.bucket_query_parser import BucketQueryParser
+from bioops.tools.bucket_inventory import BucketInventoryTool, BucketObject
+from bioops.tools.llm_action_router import (
+    LLMActionRouter,
+    format_action_routing_error,
+)
 
 
 class BucketAgent:
@@ -23,10 +26,9 @@ class BucketAgent:
         self,
         config_path: str | Path = "configs/agents.yaml",
         inventory_tool: BucketInventoryTool | None = None,
-        query_parser: BucketQueryParser | None = None,
+        action_router: LLMActionRouter | None = None,
     ) -> None:
         config = self._load_storage_config(Path(config_path))
-
         self.bucket_name = os.getenv(
             "BUCKET_NAME",
             str(config.get("bucket_name", "genotek-testing")),
@@ -39,61 +41,139 @@ class BucketAgent:
             "BUCKET_INVENTORY_DATE",
             str(config.get("inventory_date", "")),
         )
-
-        known_suffixes = config.get("known_name_suffixes") or [
-            "beagle.imputation.vcf.gz",
-            "imputation.vcf.gz",
-        ]
-        if isinstance(known_suffixes, str):
-            known_suffixes = [value.strip() for value in known_suffixes.split(",") if value.strip()]
-
-        self.query_parser = query_parser or BucketQueryParser(list(known_suffixes))
+        self.known_name_suffixes = self._known_suffixes(config)
         self.tool = inventory_tool or BucketInventoryTool(
             inventory_path=inventory_path,
             bucket_name=self.bucket_name,
             inventory_date=inventory_date,
         )
         self.max_listed_files = int(
-            os.getenv("BUCKET_MAX_LISTED_FILES", str(config.get("max_listed_files", 50)))
+            os.getenv(
+                "BUCKET_MAX_LISTED_FILES",
+                str(config.get("max_listed_files", 50)),
+            )
         )
+        self.action_router = action_router or self._build_action_router()
 
     def run(self, message: str, **_: Any) -> str:
         try:
-            query = self.query_parser.parse(message)
+            decision = self.action_router.route(message)
+        except Exception as error:
+            return format_action_routing_error("Bucket Agent", error)
 
-            if query.aggregate == "storage_class":
-                return self._format_storage_classes(query.prefix, query.extension, query.name_suffix)
-            if query.aggregate == "list_files":
-                return self._format_file_list(query.prefix, query.extension, query.name_suffix)
-            if query.aggregate == "structure":
-                return self._format_structure()
-            if query.aggregate == "extension_breakdown":
-                return self._format_extension_breakdown()
-
-            stats = self.tool.filtered_stats(
-                prefix=query.prefix,
-                extension=query.extension,
-                name_suffix=query.name_suffix,
-                known_name_suffixes=self.query_parser.known_name_suffixes,
+        try:
+            parameters = decision.parameters
+            prefix = self._optional_text(parameters.get("prefix"))
+            extension = self._optional_text(parameters.get("extension"))
+            name_suffix = self._optional_text(parameters.get("name_suffix"))
+            storage_class = self._optional_text(parameters.get("storage_class"))
+            limit = self._bounded_limit(
+                parameters.get("limit"),
+                default=self.max_listed_files,
+                maximum=self.max_listed_files,
             )
-            return self._format_stats(stats, query.aggregate)
-        except FileNotFoundError as exc:
+
+            if decision.action == "storage_class":
+                return self._format_storage_classes(
+                    prefix, extension, name_suffix, storage_class
+                )
+            if decision.action == "list_files":
+                return self._format_file_list(
+                    prefix,
+                    extension,
+                    name_suffix,
+                    storage_class,
+                    limit,
+                )
+            if decision.action == "structure":
+                return self._format_structure()
+            if decision.action == "extension_breakdown":
+                return self._format_extension_breakdown()
+            if decision.action == "help":
+                return self._help()
+
+            stats = self._filtered_stats(
+                prefix=prefix,
+                extension=extension,
+                name_suffix=name_suffix,
+                storage_class=storage_class,
+            )
+            return self._format_stats(stats, decision.action)
+        except FileNotFoundError as error:
             return (
                 "Bucket inventory is unavailable.\n\n"
-                f"Reason: {exc}\n"
+                f"Reason: {error}\n"
                 "Run the inventory exporter or configure BUCKET_INVENTORY_PATH."
             )
-        except Exception as exc:  # Defensive user-facing boundary.
-            return f"Bucket Agent could not answer the question: {exc}"
+        except Exception as error:
+            return f"Bucket Agent could not answer the question: {error}"
 
-    def _format_stats(self, stats: dict[str, object], aggregate: str) -> str:
-        if aggregate == "count":
-            title = "Bucket Object Count"
-        elif aggregate == "total_size":
-            title = "Bucket Size Summary"
-        else:
-            title = "Bucket Inventory Summary"
+    def _filtered_objects(
+        self,
+        *,
+        prefix: str | None,
+        extension: str | None,
+        name_suffix: str | None,
+        storage_class: str | None,
+    ) -> list[BucketObject]:
+        rows = self.tool.filter_objects(
+            prefix=prefix,
+            extension=extension,
+            name_suffix=name_suffix,
+            known_name_suffixes=self.known_name_suffixes,
+        )
+        if storage_class:
+            expected = storage_class.casefold()
+            rows = [
+                obj
+                for obj in rows
+                if (obj.storage_class or "UNKNOWN").strip().casefold() == expected
+            ]
+        return rows
 
+    def _filtered_stats(
+        self,
+        *,
+        prefix: str | None,
+        extension: str | None,
+        name_suffix: str | None,
+        storage_class: str | None,
+    ) -> dict[str, object]:
+        rows = self._filtered_objects(
+            prefix=prefix,
+            extension=extension,
+            name_suffix=name_suffix,
+            storage_class=storage_class,
+        )
+        by_class: dict[str, dict[str, object]] = {}
+        for obj in rows:
+            class_name = (obj.storage_class or "UNKNOWN").strip() or "UNKNOWN"
+            entry = by_class.setdefault(
+                class_name,
+                {"storage_class": class_name, "objects": 0, "bytes": 0},
+            )
+            entry["objects"] = int(entry["objects"]) + 1
+            entry["bytes"] = int(entry["bytes"]) + obj.size
+        normalized_prefix = self.tool.normalize_key(prefix or "").rstrip("/")
+        return {
+            "prefix": f"{normalized_prefix}/" if normalized_prefix else "(bucket root)",
+            "extension": extension or "(all files)",
+            "name_suffix": name_suffix or "",
+            "storage_class_filter": storage_class or "",
+            "objects": len(rows),
+            "bytes": sum(obj.size for obj in rows),
+            "storage_classes": sorted(
+                by_class.values(),
+                key=lambda row: (-int(row["bytes"]), str(row["storage_class"])),
+            ),
+        }
+
+    def _format_stats(self, stats: dict[str, object], action: str) -> str:
+        title = {
+            "count": "Bucket Object Count",
+            "total_size": "Bucket Size Summary",
+            "summary": "Bucket Inventory Summary",
+        }.get(action, "Bucket Inventory Summary")
         lines = [
             title,
             "",
@@ -104,6 +184,8 @@ class BucketAgent:
             lines.append(f"Filename suffix: {stats['name_suffix']}")
         else:
             lines.append(f"File type: {stats['extension']}")
+        if stats.get("storage_class_filter"):
+            lines.append(f"Storage class filter: {stats['storage_class_filter']}")
         lines.extend(
             [
                 f"Objects: {stats['objects']}",
@@ -117,12 +199,13 @@ class BucketAgent:
         prefix: str | None,
         extension: str | None,
         name_suffix: str | None,
+        storage_class: str | None,
     ) -> str:
-        stats = self.tool.filtered_stats(
+        stats = self._filtered_stats(
             prefix=prefix,
             extension=extension,
             name_suffix=name_suffix,
-            known_name_suffixes=self.query_parser.known_name_suffixes,
+            storage_class=storage_class,
         )
         lines = [
             "Bucket Storage Class Summary",
@@ -150,18 +233,20 @@ class BucketAgent:
         prefix: str | None,
         extension: str | None,
         name_suffix: str | None,
+        storage_class: str | None,
+        limit: int,
     ) -> str:
-        objects = self.tool.filter_objects(
+        objects = self._filtered_objects(
             prefix=prefix,
             extension=extension,
             name_suffix=name_suffix,
-            known_name_suffixes=self.query_parser.known_name_suffixes,
+            storage_class=storage_class,
         )
-        stats = self.tool.filtered_stats(
+        stats = self._filtered_stats(
             prefix=prefix,
             extension=extension,
             name_suffix=name_suffix,
-            known_name_suffixes=self.query_parser.known_name_suffixes,
+            storage_class=storage_class,
         )
         lines = [
             "Bucket File List",
@@ -176,13 +261,13 @@ class BucketAgent:
         if not objects:
             lines.append("- No matching objects")
         else:
-            for obj in objects[: self.max_listed_files]:
+            for obj in objects[:limit]:
                 lines.append(
                     f"- {obj.key} | {self.tool.format_bytes(obj.size)} | "
                     f"{obj.storage_class or 'UNKNOWN'}"
                 )
-            if len(objects) > self.max_listed_files:
-                lines.append(f"... {len(objects) - self.max_listed_files} more objects not shown")
+            if len(objects) > limit:
+                lines.append(f"... {len(objects) - limit} more objects not shown")
         return self._with_inventory_footer(lines)
 
     def _format_structure(self) -> str:
@@ -232,11 +317,110 @@ class BucketAgent:
         return "\n".join(lines)
 
     @staticmethod
+    def _build_action_router() -> LLMActionRouter:
+        return LLMActionRouter(
+            agent_name="Bucket Agent",
+            actions={
+                "summary": "Show object count and total size for a scope.",
+                "count": "Show the number of matching objects.",
+                "total_size": "Show the total size of matching objects.",
+                "storage_class": "Show storage-class totals for matching objects.",
+                "list_files": "List matching object keys and sizes.",
+                "structure": "Show top-level bucket prefixes.",
+                "extension_breakdown": "Show counts and sizes grouped by file type.",
+                "help": "Explain supported Bucket Agent questions.",
+            },
+            parameter_schema={
+                "prefix": "Optional exact object-key prefix/path.",
+                "extension": "Optional file extension such as vcf.gz.",
+                "name_suffix": "Optional exact configured filename suffix.",
+                "storage_class": "Optional storage class such as STANDARD, COLD, or TICE.",
+                "limit": "Optional integer maximum number of files to display.",
+            },
+            rules=[
+                "Use name_suffix for product suffixes such as beagle.imputation.vcf.gz.",
+                "Use extension for generic file types such as vcf.gz.",
+                "Do not invent a prefix or suffix that is absent from the request.",
+                "All operations are read-only against the local inventory snapshot.",
+            ],
+            examples=[
+                {
+                    "request": "List imputation.vcf.gz files under results/batch-1/",
+                    "action": "list_files",
+                    "parameters": {
+                        "prefix": "results/batch-1/",
+                        "extension": None,
+                        "name_suffix": "imputation.vcf.gz",
+                        "storage_class": None,
+                        "limit": None,
+                    },
+                    "reason": "A specific configured product suffix was requested.",
+                },
+                {
+                    "request": "Which storage classes are under data/c2023/?",
+                    "action": "storage_class",
+                    "parameters": {
+                        "prefix": "data/c2023/",
+                        "extension": None,
+                        "name_suffix": None,
+                        "storage_class": None,
+                        "limit": None,
+                    },
+                    "reason": "The user requests a storage-class breakdown.",
+                },
+            ],
+        )
+
+    def _help(self) -> str:
+        return (
+            "Bucket Agent\n\n"
+            "Supported read-only inventory requests:\n"
+            "- bucket summary, object count, or total size\n"
+            "- storage-class breakdown\n"
+            "- list files by prefix, extension, filename suffix, or storage class\n"
+            "- top-level bucket structure\n"
+            "- file-type breakdown"
+        )
+
+    @staticmethod
+    def _known_suffixes(config: dict[str, object]) -> list[str]:
+        values = config.get("known_name_suffixes") or [
+            "beagle.imputation.vcf.gz",
+            "imputation.vcf.gz",
+        ]
+        if isinstance(values, str):
+            values = [value.strip() for value in values.split(",") if value.strip()]
+        return [str(value).strip() for value in values if str(value).strip()]
+
+    @staticmethod
+    def _optional_text(value: Any) -> str | None:
+        if not isinstance(value, str) or not value.strip():
+            return None
+        return value.strip()
+
+    @staticmethod
+    def _bounded_limit(value: Any, *, default: int, maximum: int) -> int:
+        if value is None:
+            return default
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return default
+        return max(1, min(parsed, maximum))
+
+    @staticmethod
     def _load_storage_config(path: Path) -> dict[str, object]:
         if not path.exists():
             return {}
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         if not isinstance(data, dict):
             return {}
-        storage = data.get("storage", {})
-        return storage if isinstance(storage, dict) else {}
+
+        agents = data.get("agents", {})
+        if isinstance(agents, dict):
+            nested = agents.get("storage", {})
+            if isinstance(nested, dict):
+                return nested
+
+        legacy = data.get("storage", {})
+        return legacy if isinstance(legacy, dict) else {}

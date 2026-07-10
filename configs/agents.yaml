@@ -2,14 +2,14 @@ agents:
   general:
     enabled: true
     description: Fallback agent for greetings, unclear requests, and unsupported tasks.
+
   knowledge:
     enabled: true
-    description: Answers questions about BioOps documentation, pipeline metadata,
-      source code, inputs, outputs, and explanations.
+    description: Answers questions about BioOps documentation, pipeline metadata, source code, inputs, outputs, and explanations.
+
   cluster_health:
     enabled: true
-    description: Checks Kubernetes cluster health, pods, logs, unhealthy containers,
-      running steps, cost, and ETA.
+    description: Checks Kubernetes cluster health, pods, logs, unhealthy containers, running steps, cost, and ETA.
     namespace: bioops
     request_timeout_seconds: 5
     log_tail_lines: 50
@@ -21,14 +21,14 @@ agents:
       gvcf-to-vcf: 45
       transfer-bam: 10
       transfer-vcf: 10
+
   review:
     enabled: true
-    description: Reviews repositories, PRs/MRs, code changes, risks, style, logic
-      issues, and missing tests.
+    description: Reviews repositories, PRs/MRs, code changes, risks, style, logic issues, and missing tests.
+
   submit_master:
     enabled: true
-    description: Launches, monitors, reports, and safely retries Submit Master Argo
-      workflows.
+    description: Launches, monitors, reports, and provides safe retry instructions for Submit Master Argo workflows.
     argo_namespace: bioops-dev
     argo_service_name: argo-server
     argo_local_port: 2746
@@ -39,27 +39,27 @@ agents:
     recent_workflow_limit: 5
     step_patterns:
       config-creator:
-      - config-creator
-      - config_creator
+        - config-creator
+        - config_creator
       submit-master:
-      - submit-master
-      - submit_master
-      - submit-master-print
+        - submit-master
+        - submit_master
+        - submit-master-print
       haplotypecaller:
-      - haplotypecaller
-      - haplotype-caller
+        - haplotypecaller
+        - haplotype-caller
       transfer-vcf:
-      - transfer-vcf
-      - transfer_vcf
-      - vcf
+        - transfer-vcf
+        - transfer_vcf
+        - vcf
       transfer-bam:
-      - transfer-bam
-      - transfer_bam
-      - bam
+        - transfer-bam
+        - transfer_bam
+        - bam
+
   batch_status:
     enabled: true
-    description: Tracks Argo batch workflow statuses, updates Google Sheet, and answers
-      batch status questions.
+    description: Answers persisted batch status questions, including completed and stale records, and provides read-only export/sync instructions.
     argo_namespace: bioops-dev
     argo_workflow_template: bioops-submit-master-local
     workflow_name_prefix: bioops-submit-master
@@ -68,16 +68,17 @@ agents:
     stale_after_minutes: 30
     google_sheet:
       enabled: false
-      spreadsheet_id: ''
+      spreadsheet_id: ""
       worksheet_name: batch_status
     db_path: /data/bioops_batch_status.sqlite3
 
-storage:
-  enabled: true
-  bucket_name: genotek-testing
-  inventory_path: data/bucket_inventory.csv
-  inventory_date: ""
-  max_listed_files: 50
-  known_name_suffixes:
-    - beagle.imputation.vcf.gz
-    - imputation.vcf.gz
+  storage:
+    enabled: true
+    description: Answers read-only bucket inventory questions about paths, object counts, size, file types, storage classes, and inventory freshness.
+    bucket_name: genotek-testing
+    inventory_path: data/bucket_inventory.csv
+    inventory_date: ""
+    max_listed_files: 50
+    known_name_suffixes:
+      - beagle.imputation.vcf.gz
+      - imputation.vcf.gz

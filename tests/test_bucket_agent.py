@@ -1,6 +1,15 @@
 from pathlib import Path
 
 from bioops.agents.bucket_agent import BucketAgent
+from bioops.tools.llm_action_router import ActionDecision
+
+
+class FakeActionRouter:
+    def __init__(self, action: str, parameters: dict):
+        self.decision = ActionDecision(action, parameters, "test")
+
+    def route(self, _message: str) -> ActionDecision:
+        return self.decision
 
 
 def _inventory(path: Path) -> None:
@@ -23,9 +32,19 @@ def test_lists_actual_matching_files(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("BUCKET_INVENTORY_PATH", str(inventory))
     monkeypatch.setenv("BUCKET_NAME", "genotek-testing")
 
-    response = BucketAgent(config_path=tmp_path / "missing.yaml").run(
-        "list files imputation.vcf.gz under results/batch-1/"
-    )
+    response = BucketAgent(
+        config_path=tmp_path / "missing.yaml",
+        action_router=FakeActionRouter(
+            "list_files",
+            {
+                "prefix": "results/batch-1/",
+                "extension": None,
+                "name_suffix": "imputation.vcf.gz",
+                "storage_class": None,
+                "limit": 50,
+            },
+        ),
+    ).run("flexible natural-language request")
 
     assert "results/batch-1/a.imputation.vcf.gz" in response
     assert "a.beagle.imputation.vcf.gz" not in response
@@ -38,9 +57,19 @@ def test_answers_storage_class_question(tmp_path: Path, monkeypatch) -> None:
     _inventory(inventory)
     monkeypatch.setenv("BUCKET_INVENTORY_PATH", str(inventory))
 
-    response = BucketAgent(config_path=tmp_path / "missing.yaml").run(
-        "which storage class are files under data/c2023/"
-    )
+    response = BucketAgent(
+        config_path=tmp_path / "missing.yaml",
+        action_router=FakeActionRouter(
+            "storage_class",
+            {
+                "prefix": "data/c2023/",
+                "extension": None,
+                "name_suffix": None,
+                "storage_class": None,
+                "limit": None,
+            },
+        ),
+    ).run("flexible natural-language request")
 
     assert "Bucket Storage Class Summary" in response
     assert "TICE: 1 objects, 100 B" in response

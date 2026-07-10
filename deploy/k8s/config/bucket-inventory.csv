@@ -1,0 +1,4 @@
+genotek-testing,data/c2023/c2023.imputed.vcf.gz,100,TICE
+genotek-testing,data/dg5163/dg5163_chip_hg38.vcf,200,STANDARD
+genotek-testing,results/batch-1/a.imputation.vcf.gz,300,COLD
+genotek-testing,results/batch-1/a.beagle.imputation.vcf.gz,400,COLD

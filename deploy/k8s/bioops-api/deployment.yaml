@@ -9,14 +9,11 @@ metadata:
     app.kubernetes.io/part-of: bioops
 spec:
   replicas: 1
-
   selector:
     matchLabels:
       app: bioops-api
-
   strategy:
     type: RollingUpdate
-
   template:
     metadata:
       labels:
@@ -25,57 +22,47 @@ spec:
         app.kubernetes.io/part-of: bioops
     spec:
       serviceAccountName: bioops-student
-
       nodeSelector:
         genoteknodetype: fastmri-cpu
-
       tolerations:
         - key: yandex.cloud/preemptible
           operator: Equal
           value: "true"
           effect: NoSchedule
-
       containers:
         - name: bioops-api
-          image: cr.yandex/crp5l1da4kinv8ofomr5/fastmri-students/bioops:k8s-demo-0be7b58
+          image: cr.yandex/crp5l1da4kinv8ofomr5/fastmri-students/bioops:k8s-demo-llm-routing-20260710
           imagePullPolicy: Always
-
           command:
             - python
             - -m
             - uvicorn
-
           args:
             - bioops.api.bitrix_app:app
             - --host
             - 0.0.0.0
             - --port
             - "8000"
-
           ports:
             - name: http
               containerPort: 8000
               protocol: TCP
-
           envFrom:
             - configMapRef:
                 name: bioops-config
             - secretRef:
                 name: bioops-secrets
-
           startupProbe:
             tcpSocket:
               port: http
             periodSeconds: 5
             failureThreshold: 30
-
           readinessProbe:
             tcpSocket:
               port: http
             periodSeconds: 10
             timeoutSeconds: 2
             failureThreshold: 3
-
           livenessProbe:
             tcpSocket:
               port: http
@@ -83,7 +70,6 @@ spec:
             periodSeconds: 20
             timeoutSeconds: 2
             failureThreshold: 3
-
           resources:
             requests:
               cpu: "250m"
@@ -91,21 +77,24 @@ spec:
             limits:
               cpu: "1"
               memory: "2Gi"
-
           volumeMounts:
             - name: agents-config
               mountPath: /app/configs/agents.yaml
               subPath: agents.yaml
               readOnly: true
-
             - name: batch-status-db
               mountPath: /data
-
+            - name: bucket-inventory
+              mountPath: /app/data/bucket_inventory.csv
+              subPath: bucket_inventory.csv
+              readOnly: true
       volumes:
         - name: agents-config
           configMap:
             name: bioops-agents-config
-
         - name: batch-status-db
           persistentVolumeClaim:
             claimName: bioops-batch-status-db
+        - name: bucket-inventory
+          configMap:
+            name: bioops-bucket-inventory

@@ -13,8 +13,8 @@ DEFAULT_ALLOWED_AGENTS = {
     "review",
     "submit_master",
     "batch_status",
+    "storage",
 }
-
 ALLOWED_AGENTS = DEFAULT_ALLOWED_AGENTS
 
 
@@ -33,7 +33,6 @@ class LLMRouterTool:
     ):
         self.allowed_agents = set(allowed_agents or DEFAULT_ALLOWED_AGENTS)
         self.allowed_agents.add("general")
-
         unsupported_agents = self.allowed_agents - DEFAULT_ALLOWED_AGENTS
         if unsupported_agents:
             raise ValueError(
@@ -48,11 +47,9 @@ class LLMRouterTool:
             or os.getenv("AZURE_OPENAI_DEPLOYMENT")
             or os.getenv("AZURE_OPENAI_MODEL")
         )
-
         self.enabled = all(
             [self.endpoint, self.api_key, self.api_version, self.deployment]
         )
-
         self.client = None
         if self.enabled:
             self.client = AzureOpenAI(
@@ -63,10 +60,8 @@ class LLMRouterTool:
             )
 
     def _strip_surrogates(self, text: str) -> str:
-        """Remove invalid Unicode surrogate code points before sending text to Azure."""
         return "".join(
-            char for char in text
-            if not 0xD800 <= ord(char) <= 0xDFFF
+            char for char in text if not 0xD800 <= ord(char) <= 0xDFFF
         )
 
     def route(self, message: str) -> RouterDecision:
@@ -88,7 +83,6 @@ class LLMRouterTool:
             },
             {"role": "user", "content": prompt},
         ]
-
         try:
             response = self.client.chat.completions.create(
                 model=self.deployment,
@@ -105,7 +99,6 @@ class LLMRouterTool:
             raise RuntimeError(
                 f"LLM router request failed: {type(error).__name__}: {error}"
             ) from error
-
         return self._parse_response(response.choices[0].message.content or "")
 
     def _build_prompt(self, message: str) -> str:
@@ -120,34 +113,33 @@ class LLMRouterTool:
             ),
             "cluster_health": (
                 "general Kubernetes cluster health, pods, pod logs, failed/running jobs, "
-                "health monitor, Bitrix health alerts, cost, ETA, or runtime status "
-                "when the request is not specifically about Submit Master"
+                "health monitor, cost, ETA, or runtime status when the request is not "
+                "specifically about Submit Master"
             ),
             "review": (
-                "code review, repository review, GitHub pull requests, branch comparisons, "
-                "diffs, implementation risks, suspicious files, or missing tests"
+                "code review, repository review, GitHub pull requests, branch "
+                "comparisons, diffs, implementation risks, suspicious files, or tests"
             ),
             "submit_master": (
-                "Submit Master and Argo SubmitMaster workflow operations: "
-                "D1 config generation, D2 Submit Master launch or run preparation, "
-                "D3 Submit Master progress/status/log/error monitoring, "
-                "D4 failed Submit Master pod or workflow-node reports, "
-                "D5 safe retry or resubmission of failed Submit Master workflows"
+                "Submit Master and Argo SubmitMaster operations: D1 config generation, "
+                "D2 UI/launch preparation, D3 progress, D4 failure diagnosis, "
+                "or D5 safe retry instructions"
             ),
             "batch_status": (
-                "Batch Status Agent requests: batch processing statuses, latest batch status, "
-                "status of a specific batch, failed batches, running batches, completed batches, "
-                "stale batches, status DB records, CSV/JSON status export, or Google Sheet "
-                "batch status synchronization"
+                "persisted batch status records: latest batch status, status of a specific "
+                "batch, failed batches, running batches, completed batches, stale "
+                "batches, and read-only export or synchronization information"
+            ),
+            "storage": (
+                "Bucket Agent inventory questions: object count, size, prefixes, files, "
+                "extensions, filename suffixes, storage classes, and inventory freshness"
             ),
         }
-
         allowed_lines = "\n".join(
             f"- {agent}: {agent_descriptions[agent]}"
             for agent in sorted(self.allowed_agents)
         )
         allowed_values = "|".join(sorted(self.allowed_agents))
-
         return f"""
 Choose exactly one enabled BioOps agent for this user request.
 
@@ -157,16 +149,15 @@ Enabled agents:
 Rules:
 - Use full context, not single keywords.
 - Choose only one of the enabled agents listed above.
-- Do not choose an agent that is not listed above.
-- Choose submit_master for requests about Submit Master, Config Creator, SubmitMaster Argo workflows, D1/D2/D3/D4/D5, Submit Master progress, Submit Master failures, failed Submit Master pods, or safe retry/resubmission of Submit Master workflows.
-- Choose batch_status for requests about batch status records, latest batch status, failed/running/completed batches, or questions like "status of batch N".
-- Choose cluster_health for general Kubernetes pod or cluster health questions that are not specifically about Submit Master or batch status records.
-- Do not choose review only because the word "review" appears if the user is asking about health logs or documentation.
-- Do not choose knowledge only because the word "explain" appears; decide whether the explanation needs docs, cluster status, code review, Submit Master operation, batch status, or general response.
+- Choose storage for object-storage inventory, bucket paths, object sizes, file lists,
+  storage classes, extensions, or inventory snapshot questions.
+- Choose submit_master for SubmitMaster Argo progress, failures, UI, or retry guidance.
+- Choose batch_status for persisted batch records, including completed and stale batches.
+- Choose cluster_health for general Kubernetes health not owned by SubmitMaster.
 - Return JSON only.
 
 JSON shape:
-{{ "agent": "{allowed_values}", "reason": "short reason" }}
+{{"agent": "{allowed_values}", "reason": "short reason"}}
 
 User request:
 {message}
@@ -177,30 +168,24 @@ User request:
         data = self._parse_json(content)
         if not isinstance(data, dict):
             raise ValueError("LLM router returned non-JSON or invalid JSON content.")
-
         agent = data.get("agent")
         reason = data.get("reason", "")
-
         if not isinstance(agent, str):
             raise ValueError("LLM router response is missing string field 'agent'.")
-
         agent = agent.strip().lower()
-
         if agent not in self.allowed_agents:
-            raise ValueError(f"LLM router returned disabled or unsupported agent: {agent}")
-
+            raise ValueError(
+                f"LLM router returned disabled or unsupported agent: {agent}"
+            )
         if not isinstance(reason, str) or not reason.strip():
             reason = "No reason provided."
-
         return RouterDecision(agent=agent, reason=reason.strip())
 
     def _parse_json(self, content: str) -> Any:
         cleaned = content.strip()
-
         if cleaned.startswith("```"):
             cleaned = cleaned.removeprefix("```json").removeprefix("```").strip()
             cleaned = cleaned.removesuffix("```").strip()
-
         try:
             return json.loads(cleaned)
         except json.JSONDecodeError:

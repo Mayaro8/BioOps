@@ -1,18 +1,21 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-
 namespace: bioops-dev
 
 configMapGenerator:
   - name: bioops-config
     envs:
       - runtime.env
-
   - name: bioops-agents-config
     files:
       - agents.yaml
+  - name: bioops-bucket-inventory
+    files:
+      - bucket_inventory.csv=bucket-inventory.csv
 
 generatorOptions:
   disableNameSuffixHash: true
-  labels:
-    app.kubernetes.io/part-of: bioops
+
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: bioops
