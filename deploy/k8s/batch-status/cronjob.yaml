@@ -7,7 +7,7 @@ metadata:
     app.kubernetes.io/name: batch-status-sync
     app.kubernetes.io/part-of: bioops
 spec:
-  schedule: '*/15 * * * *'
+  schedule: "*/30 * * * *"
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 300
   successfulJobsHistoryLimit: 3
@@ -34,7 +34,7 @@ spec:
             effect: NoSchedule
           containers:
           - name: batch-status-sync
-            image: cr.yandex/crp5l1da4kinv8ofomr5/fastmri-students/bioops:k8s-demo-0be7b58
+            image: cr.yandex/crp5l1da4kinv8ofomr5/fastmri-students/bioops:k8s-demo-llm-routing-20260710
             imagePullPolicy: Always
             command:
             - /bin/sh

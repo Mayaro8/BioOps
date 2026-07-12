@@ -67,7 +67,7 @@ spec:
           - name: stage
           - name: mode
       container:
-        image: cr.yandex/crp5l1da4kinv8ofomr5/fastmri-students/bioops:k8s-demo-0be7b58
+        image: cr.yandex/crp5l1da4kinv8ofomr5/fastmri-students/bioops:k8s-demo-llm-routing-20260710
         imagePullPolicy: Always
         command:
           - python3
@@ -105,7 +105,7 @@ spec:
         parameters:
           - name: generated-config
       container:
-        image: cr.yandex/crp5l1da4kinv8ofomr5/fastmri-students/bioops:k8s-demo-0be7b58
+        image: cr.yandex/crp5l1da4kinv8ofomr5/fastmri-students/bioops:k8s-demo-llm-routing-20260710
         imagePullPolicy: Always
         env:
           - name: SUBMIT_MASTER_CONFIG

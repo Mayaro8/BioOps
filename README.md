@@ -1,336 +1,759 @@
 # BioOps
 
-BioOps is a multi-agent assistant for bioinformatics operations, including knowledge retrieval, Kubernetes cluster health monitoring, pipeline status reporting, Submit Master operations, code review, and operational alerts.
+---
 
-## Documentation
+## 1. Architecture
 
-Detailed project documentation is available in `docs/`:
+```text
+Browser
+   |
+   | HTTPS + Basic Auth
+   v
+LoadBalancer Service
+   |
+   v
+Caddy sidecar
+   |
+   v
+FastAPI /chat
+   |
+   v
+LLM Router
+   |
+   +-- General Agent
+   +-- Knowledge Agent -------> Qdrant
+   +-- Cluster Health Agent --> Kubernetes API and Pod logs
+   +-- Review Agent ----------> GitHub API or local repository
+   +-- Submit Master Agent ---> Argo Workflow CRDs
+   +-- Batch Status Agent ----> SQLite database on PVC
+   +-- Storage Agent ---------> CSV bucket inventory
+```
 
-- `docs/README.md` — full project overview.
-- `docs/DESIGN.md` — architecture and design notes.
-- `docs/assignment.md` — Russian assignment specification.
-- `docs/assignment.en.md` — English assignment specification.
-
-## Current agents include
-
-- Knowledge Agent — answers questions from indexed project documentation.
-- Cluster Health Agent — checks Kubernetes pod health, logs, running steps, cost, and ETA.
-- Review Agent — reviews local repositories, GitHub repositories, PRs, open PRs, and branch comparisons.
-- Submit Master Agent — prepares, launches, monitors, reports, and safely retries Submit Master workflows.
-- General fallback agent — handles greetings, unclear requests, and unsupported tasks.
+The public browser interface is the canonical BioOps frontend.
 
 ---
 
-## 1. Requirements
+## 2. Repository structure
+
+```text
+BioOps/
+├── README.md
+├── Dockerfile
+├── docker-compose.yml
+├── configs/
+│   └── agents.yaml
+├── docs/
+│   ├── assignment.md
+│   ├── assignment.en.md
+│   └── DESIGN.md
+├── src/bioops/
+│   ├── agents/
+│   ├── api/
+│   ├── jobs/
+│   ├── rag/
+│   └── tools/
+├── deploy/k8s/
+│   ├── config/
+│   ├── qdrant/
+│   ├── bioops-api/
+│   ├── batch-status/
+│   ├── cluster-health/
+│   └── kustomization.yaml
+└── deploy/argo/
+    ├── knowledge-ingest-template.yaml
+    ├── submit-master-template.yaml
+    ├── workflow-ci.yaml
+    └── kustomization.yaml
+```
+
+---
+
+## 3. Current agents
+
+### General Agent
+
+Handles greetings, unclear questions, and unsupported requests.
+
+### Knowledge Agent
+
+Answers questions from indexed project documentation stored in Qdrant.
+
+Example:
+
+```text
+Explain the BioOps orchestrator.
+```
+
+### Cluster Health Agent
+
+Reads live Kubernetes data and reports:
+
+- Pod phases;
+- container readiness;
+- restarts;
+- recent errors;
+- active pipeline steps;
+- runtime;
+- ETA where configured;
+- cost where available.
+
+Example:
+
+```text
+Check cluster health.
+```
+
+The Cluster Health Agent is read-only. It does not restart Pods.
+
+### Review Agent
+
+Performs read-only reviews of:
+
+- local repositories;
+- GitHub repositories;
+- pull requests;
+- open pull requests;
+- branch comparisons.
+
+Example:
+
+```text
+Review the Mayaro8/BioOps repository and identify the main engineering risks.
+```
+
+The Review Agent does not approve, reject, comment on, or modify pull requests.
+
+### Submit Master Agent
+
+Supports Submit Master operations through Argo Workflows.
+
+Epic D consists of:
+
+```text
+D1 — generate a Submit Master configuration
+D2 — launch Submit Master
+D3 — monitor status, progress, errors, logs, runtime, cost, and ETA
+D4 — report failed Pods or workflow nodes
+D5 — safely retry a failed Workflow
+```
+
+The current repository contains a demonstration WorkflowTemplate at:
+
+```text
+deploy/argo/submit-master-template.yaml
+```
+
+The demo contains two tasks:
+
+```text
+config-creator
+      |
+      v
+submit-master
+```
+
+The current template demonstrates Argo scheduling, parameter handling, and task-to-task output passing.
+
+It is not yet the real production Submit Master package.
+
+### Batch Status Agent
+
+Reads batch and workflow status from:
+
+```text
+/data/bioops_batch_status.sqlite3
+```
+
+The database is stored on a Kubernetes PVC.
+
+### Storage Agent
+
+Reads CSV bucket inventory data and reports:
+
+- object count;
+- total size;
+- prefixes;
+- file extensions;
+- storage classes;
+- filtered inventory summaries.
+
+---
+
+## 4. Current container image
+
+The canonical image tag is:
+
+```bash
+IMAGE="cr.yandex/crp5l1da4kinv8ofomr5/fastmri-students/bioops:k8s-demo-llm-routing-20260710"
+```
+
+All active Kubernetes and Argo manifests should use the same image.
+
+Check image references:
+
+```bash
+grep -RIn \
+  'cr.yandex/crp5l1da4kinv8ofomr5/fastmri-students/bioops:' \
+  deploy
+```
+
+---
+
+## 5. Requirements
+
+Local tools:
 
 ```text
 Git
 Docker
 Docker Compose
-kubectl, only for Cluster Health Agent and Submit Master Agent
-A running Kubernetes cluster, only for Cluster Health Agent and Submit Master Agent
-Argo Workflows, only for Submit Master Agent
-Azure OpenAI credentials, for Knowledge Agent, LLM router, and LLM review
-GitHub token, for GitHub Review Agent
-Bitrix24 webhook, optional for Health Monitor alerts and Submit Master reports
+Yandex Cloud CLI
+kubectl
+Argo CLI
+```
+
+Cluster requirements:
+
+```text
+Kubernetes namespace: bioops-dev
+Argo Workflows installed
+PersistentVolume support
+Yandex Container Registry access
+fastmri-cpu worker nodes
+ServiceAccount with required RBAC
+```
+
+The current workloads use:
+
+```yaml
+serviceAccountName: bioops-student
+```
+
+Scheduling configuration:
+
+```yaml
+nodeSelector:
+  genoteknodetype: fastmri-cpu
+
+tolerations:
+  - key: yandex.cloud/preemptible
+    operator: Equal
+    value: "true"
+    effect: NoSchedule
 ```
 
 ---
 
-## 2. One-time setup
+## 6. Clone and select the branch
 
 ```bash
 git clone https://github.com/Mayaro8/BioOps.git
 cd BioOps
-cp .env.example .env
-nano .env
+
+git fetch --all --prune
+git switch k8s-demo-llm-action-routing
+git pull --ff-only
 ```
 
-Minimum useful `.env` shape:
-
-```env
-AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
-AZURE_OPENAI_API_KEY=your_azure_openai_key
-AZURE_OPENAI_API_VERSION=2024-12-01-preview
-AZURE_OPENAI_EMBEDDING_DEPLOYMENT=text-embedding-3-large
-AZURE_OPENAI_CHAT_DEPLOYMENT=your_chat_deployment
-
-QDRANT_URL=http://localhost:6333
-QDRANT_COLLECTION=bioops_knowledge
-
-GITHUB_TOKEN=your_github_token
-
-ALERT_CHANNEL=console
-BITRIX_WEBHOOK_URL=
-BITRIX_DIALOG_ID=
-```
-
-Do not commit `.env`.
-
----
-
-## 3. Build and launch BioOps
+Confirm:
 
 ```bash
-docker compose build bioops
-docker compose up -d qdrant
-docker compose run --rm bioops python -m bioops.rag.ingest
-docker compose run --rm bioops python -m pytest
-docker compose run --rm bioops python -m bioops.main
-```
-
-Expected startup:
-
-```text
-BioOps CLI started. Type 'exit' to quit.
-You:
+git branch --show-current
+git status
 ```
 
 ---
 
-## 4. Knowledge Agent
+## 7. Configure Yandex Container Registry
 
-Purpose:
-
-```text
-Answer questions from indexed files in docs/.
-```
-
-Example prompts:
-
-```text
-Explain pipeline-v3.0 steps.
-What does bam to gvcf output?
-Which step takes a gvcf file as input?
-```
-
----
-
-## 5. Review Agent
-
-Purpose:
-
-```text
-Read-only code review for local repos, GitHub repos, PRs, open PRs, and branch comparisons.
-```
-
-Example prompts:
-
-```text
-Review path=/app
-Review repo=Mayaro8/BioOps
-Check open PRs repo=Mayaro8/BioOps
-Review repo=Mayaro8/BioOps pr=1
-Review repo=Mayaro8/BioOps base=main head=feature/example
-```
-
-Safety:
-
-```text
-The Review Agent is read-only.
-It does not approve PRs.
-It does not reject PRs.
-It does not post comments.
-It does not push commits.
-```
-
----
-
-## 6. Cluster Health Agent
-
-Purpose:
-
-```text
-Check Kubernetes pod health, running pipeline steps, unhealthy pods, logs, cost, and ETA.
-```
-
-Example prompts:
-
-```text
-Check Kubernetes cluster health.
-Are any pods failing?
-Which pipeline steps are running?
-Show recent Kubernetes errors.
-What is the ETA for the running pipeline?
-How much is the current cluster run costing?
-```
-
-Note:
-
-```text
-The Cluster Health Agent is read-only.
-It reports pod health and errors.
-It does not restart pods.
-Submit Master retry belongs to the Submit Master Agent and D5 job.
-```
-
----
-
-## 7. Health Monitor and Bitrix24 alerts
-
-Purpose:
-
-```text
-Run Cluster Health Agent without opening the CLI.
-Useful for scheduled checks and Bitrix24 demos.
-```
-
-Flow:
-
-```text
-cron or manual command
-↓
-scripts/run_cluster_health_monitor.sh
-↓
-python -m bioops.jobs.cluster_health_monitor
-↓
-ClusterHealthAgent
-↓
-AlertTool
-↓
-console or Bitrix24
-```
-
-Bitrix configuration:
-
-```env
-ALERT_CHANNEL=bitrix
-BITRIX_WEBHOOK_URL=https://your-domain.bitrix24.com/rest/USER_ID/WEBHOOK_CODE
-BITRIX_DIALOG_ID=chat123
-```
-
-Run manually:
+Configure the Yandex Docker credential helper:
 
 ```bash
-docker compose run --rm bioops python -m bioops.jobs.cluster_health_monitor
+yc config profile list
+yc config list
+yc container registry configure-docker
 ```
 
----
-
-## 8. Submit Master Agent
-
-Purpose:
-
-```text
-Prepare, launch, monitor, report, and safely retry Submit Master workflows through BioOps.
-```
-
-The Submit Master Agent covers Epic D:
-
-```text
-D1 — generate original-compatible Submit Master configuration.
-D2 — prepare and launch Submit Master through Argo.
-D3 — monitor Submit Master workflow status, progress, errors, logs, runtime, cost, and ETA where available.
-D4 — report failed Submit Master workflow pods/nodes to Bitrix24.
-D5 — safely retry failed Submit Master workflows with retry limits and safety checks.
-```
-
-Useful files:
-
-```text
-src/bioops/agents/submit_master_agent.py
-src/bioops/tools/argo_ui_launcher.py
-src/bioops/tools/argo_workflow_monitor.py
-src/bioops/jobs/submit_master_d3_bitrix_report.py
-src/bioops/jobs/submit_master_d4_failure_bitrix_report.py
-src/bioops/jobs/submit_master_d5_retry_bitrix_report.py
-k8s/argo/local/bioops-submit-master-local.yaml
-k8s/argo/real/bioops-submit-master-real.yaml
-k8s/argo/company/bioops-submit-master-company.yaml
-```
-
-Example prompts:
-
-```text
-Launch Submit Master.
-Open Submit Master in Argo.
-Show Submit Master progress.
-Report failed Submit Master pods to Bitrix.
-Retry failed Submit Master workflows safely.
-```
-
-Safety:
-
-```text
-Submit Master retry is guarded.
-Known deterministic/configuration failures should not be retried automatically.
-Retries are capped.
-Resubmitted workflows are annotated with retry metadata.
-Active retries should not be duplicated.
-```
-
----
-
-## 9. BioOps API and Bitrix24 Kubernetes mode
-
-Purpose:
-
-```text
-Run BioOps as a Kubernetes API service that can receive Bitrix24 messages and send responses back to Bitrix24.
-```
-
-Useful files:
-
-```text
-src/bioops/api/bitrix_app.py
-k8s/bioops-api/deployment.yaml
-k8s/bioops-api/service.yaml
-k8s/bioops-api/ingress.yaml
-k8s/bioops-dev.yaml
-k8s/bioops-argo-rbac.yaml
-```
-
-Required Kubernetes secret:
+Verify:
 
 ```bash
-kubectl create secret generic bioops-api-secrets \
+grep -A5 -B2 '"credHelpers"' ~/.docker/config.json
+```
+
+Expected configuration:
+
+```json
+{
+  "credHelpers": {
+    "cr.yandex": "yc"
+  }
+}
+```
+
+When the credential helper is configured, do not use a separate `docker login cr.yandex` command.
+
+---
+
+## 8. Build and push the image
+
+```bash
+IMAGE="cr.yandex/crp5l1da4kinv8ofomr5/fastmri-students/bioops:k8s-demo-llm-routing-20260710"
+
+docker build -t "$IMAGE" .
+docker push "$IMAGE"
+```
+
+A successful push returns a registry digest:
+
+```text
+digest: sha256:...
+```
+
+---
+
+## 9. Kubernetes secrets
+
+Never commit credentials to Git.
+
+The main application Secret is:
+
+```text
+bioops-secrets
+```
+
+It should contain the required Azure OpenAI and GitHub values.
+
+Example:
+
+```bash
+read -rsp "Azure OpenAI API key: " AZURE_OPENAI_API_KEY
+echo
+
+read -rsp "GitHub token: " GITHUB_TOKEN
+echo
+```
+
+Set the non-secret Azure values:
+
+```bash
+AZURE_OPENAI_ENDPOINT="https://YOUR-RESOURCE.openai.azure.com/"
+AZURE_OPENAI_API_VERSION="2024-12-01-preview"
+AZURE_OPENAI_CHAT_DEPLOYMENT="YOUR-CHAT-DEPLOYMENT"
+AZURE_OPENAI_EMBEDDING_DEPLOYMENT="YOUR-EMBEDDING-DEPLOYMENT"
+```
+
+Create or update the Secret:
+
+```bash
+kubectl -n bioops-dev create secret generic bioops-secrets \
+  --from-literal=AZURE_OPENAI_ENDPOINT="$AZURE_OPENAI_ENDPOINT" \
+  --from-literal=AZURE_OPENAI_API_KEY="$AZURE_OPENAI_API_KEY" \
+  --from-literal=AZURE_OPENAI_API_VERSION="$AZURE_OPENAI_API_VERSION" \
+  --from-literal=AZURE_OPENAI_CHAT_DEPLOYMENT="$AZURE_OPENAI_CHAT_DEPLOYMENT" \
+  --from-literal=AZURE_OPENAI_EMBEDDING_DEPLOYMENT="$AZURE_OPENAI_EMBEDDING_DEPLOYMENT" \
+  --from-literal=GITHUB_TOKEN="$GITHUB_TOKEN" \
+  --dry-run=client \
+  -o yaml \
+  | kubectl apply -f -
+```
+
+Clear the shell variables:
+
+```bash
+unset AZURE_OPENAI_API_KEY GITHUB_TOKEN
+```
+
+---
+
+## 10. Browser Basic Auth
+
+The browser authentication Secret is:
+
+```text
+bioops-edge-auth
+```
+
+Create it:
+
+```bash
+BIOOPS_USERNAME="bioops"
+
+read -rsp "Browser password: " BIOOPS_PASSWORD
+echo
+
+BIOOPS_PASSWORD_HASH="$(
+  docker run --rm caddy:2-alpine \
+  caddy hash-password \
+  --plaintext "$BIOOPS_PASSWORD"
+)"
+```
+
+```bash
+kubectl -n bioops-dev create secret generic bioops-edge-auth \
+  --from-literal=username="$BIOOPS_USERNAME" \
+  --from-literal=password-hash="$BIOOPS_PASSWORD_HASH" \
+  --dry-run=client \
+  -o yaml \
+  | kubectl apply -f -
+```
+
+```bash
+unset BIOOPS_PASSWORD BIOOPS_PASSWORD_HASH
+```
+
+---
+
+
+## 12. Validate Kubernetes and Argo manifests
+
+Render the Kubernetes release:
+
+```bash
+kubectl kustomize deploy/k8s \
+  > /tmp/bioops-k8s-rendered.yaml
+```
+
+Render the Argo resources:
+
+```bash
+kubectl kustomize deploy/argo \
+  > /tmp/bioops-argo-rendered.yaml
+```
+
+Client-side validation:
+
+```bash
+kubectl apply -k deploy/k8s \
+  --dry-run=client
+
+kubectl apply -k deploy/argo \
+  --dry-run=client
+```
+
+---
+
+## 13. Deploy Kubernetes resources
+
+```bash
+kubectl apply -k deploy/k8s
+```
+
+Watch the API rollout:
+
+```bash
+kubectl -n bioops-dev rollout status \
+  deployment/bioops-api \
+  --timeout=5m
+```
+
+Inspect resources:
+
+```bash
+kubectl -n bioops-dev get pods -o wide
+kubectl -n bioops-dev get services
+kubectl -n bioops-dev get pvc
+kubectl -n bioops-dev get cronjobs
+```
+
+The BioOps API Pod should reach:
+
+```text
+2/2 Running
+```
+
+Check API logs:
+
+```bash
+kubectl -n bioops-dev logs \
+  deployment/bioops-api \
+  -c bioops-api \
+  --tail=200
+```
+
+---
+
+## 14. Deploy Argo WorkflowTemplates
+
+Argo resources are deployed separately:
+
+```bash
+kubectl apply -k deploy/argo
+```
+
+Verify:
+
+```bash
+kubectl -n bioops-dev get \
+  workflowtemplates.argoproj.io
+```
+
+Expected templates include:
+
+```text
+bioops-knowledge-ingest
+bioops-submit-master-local
+```
+
+---
+
+## 15. Knowledge ingestion workflow
+
+Submit the knowledge-ingestion workflow:
+
+```bash
+argo submit \
   -n bioops-dev \
-  --from-literal=BITRIX_WEBHOOK_URL='https://your-domain.bitrix24.com/rest/USER_ID/WEBHOOK_CODE' \
-  --from-literal=BITRIX_DIALOG_ID='chat123'
+  deploy/argo/workflow-ci.yaml \
+  --watch
 ```
 
-Apply manifests:
+Inspect:
 
 ```bash
-kubectl apply -f k8s/bioops-api/deployment.yaml
-kubectl apply -f k8s/bioops-api/service.yaml
-kubectl apply -f k8s/bioops-api/ingress.yaml
+argo list -n bioops-dev
+argo logs -n bioops-dev @latest
 ```
 
-Health check:
+Success criteria:
 
-```bash
-curl https://YOUR_HOST/health
-```
-
-Bitrix message test:
-
-```bash
-curl -X POST https://YOUR_HOST/bitrix/message \
-  -H 'Content-Type: application/json' \
-  -d '{"message":"hello from Bitrix","dialog_id":"chat123"}'
+```text
+Qdrant is reachable
+Knowledge source files are found
+Ingestion completes successfully
+Workflow phase is Succeeded
+Container exit code is 0
 ```
 
 ---
 
-## 10. Minimal demo sequence
+## 16. Submit Master demo
+
+Apply the Submit Master WorkflowTemplate:
 
 ```bash
-git clone https://github.com/Mayaro8/BioOps.git
-cd BioOps
-cp .env.example .env
-nano .env
-docker compose build bioops
-docker compose up -d qdrant
-docker compose run --rm bioops python -m bioops.rag.ingest
-docker compose run --rm bioops python -m pytest
-docker compose run --rm bioops python -m bioops.main
+kubectl apply \
+  -f deploy/argo/submit-master-template.yaml
 ```
 
-## 11. What are the different functionalities of the submit master agent
+Submit the demo Workflow:
 
-First it would launch the Argo UI taking the bioinformatician into the submit master, completing D1. For D2, the agent launches Config Creator, a package already developed that creates config for the submit master. For D3-D4, it send a Bitrix24 report to the user. For D5, it restarts the pod. 
+```bash
+argo submit \
+  -n bioops-dev \
+  --from workflowtemplate/bioops-submit-master-local \
+  -p batch_id=batch-demo-001 \
+  -p samples=sample1,sample2 \
+  -p stage=2 \
+  -p mode=demo \
+  --watch
+```
 
-To test the functionality, the agent must be deployed onto K8s and then accessed through Bitrix 24, after that a command through Bitrix24, will connect to Argo and read or perform the action. For now, it is manually launched on Argo and the messages it send are checked through Bitrix24. 
+Inspect:
 
-After deploying the image of the agent on K8s, I would need to do some more tests to check how it works.
+```bash
+argo get -n bioops-dev @latest
+argo logs -n bioops-dev @latest
+```
+
+The current D5 retry implementation does not restart the same failed Pod.
+
+It:
+
+```text
+finds a failed Argo Workflow
+checks whether the failure is safely retryable
+checks retry limits and active retries
+copies the old Workflow specification
+creates a new Argo Workflow
+allows Argo to create fresh Pods
+```
+
+The original failed Workflow and Pods remain available for audit and diagnosis.
+
+---
+
+## 17. Cluster Health CronJob
+
+The Cluster Health scheduler is defined at:
+
+```text
+deploy/k8s/cluster-health/cronjob.yaml
+```
+
+It runs:
+
+```text
+python -m bioops.jobs.cluster_health_monitor
+```
+
+Check the CronJob:
+
+```bash
+kubectl -n bioops-dev get \
+  cronjob cluster-health-monitor
+```
+
+Run it manually:
+
+```bash
+kubectl -n bioops-dev create job \
+  --from=cronjob/cluster-health-monitor \
+  cluster-health-monitor-manual-$(date +%s)
+```
+
+Inspect logs:
+
+```bash
+kubectl -n bioops-dev logs \
+  -l app.kubernetes.io/name=cluster-health-monitor \
+  --tail=200
+```
+
+Current limitations:
+
+```text
+The periodic report is written to Job logs.
+Browser notifications are not yet implemented.
+An in-cluster CronJob cannot detect that its own cluster is powered off.
+```
+
+Complete cluster-outage detection requires an external monitor.
+
+---
+
+## 18. Batch Status CronJob
+
+The Batch Status scheduler is defined at:
+
+```text
+deploy/k8s/batch-status/cronjob.yaml
+```
+
+It updates:
+
+```text
+/data/bioops_batch_status.sqlite3
+```
+
+Check it:
+
+```bash
+kubectl -n bioops-dev get \
+  cronjob batch-status-sync
+```
+
+Enable it:
+
+```bash
+kubectl -n bioops-dev patch \
+  cronjob batch-status-sync \
+  --type=merge \
+  -p '{"spec":{"suspend":false}}'
+```
+
+Run it once manually:
+
+```bash
+kubectl -n bioops-dev create job \
+  --from=cronjob/batch-status-sync \
+  batch-status-sync-manual-$(date +%s)
+```
+
+Google Sheets synchronization exists in code but is disabled in the current deployment.
+
+---
+
+## 19. Browser interface
+
+Find the public Service:
+
+```bash
+kubectl -n bioops-dev get \
+  service bioops-api \
+  -o wide
+```
+
+Check the health endpoint:
+
+```bash
+curl -fsS \
+  "https://YOUR-BIOOPS-HOST/health"
+
+echo
+```
+
+Expected response:
+
+```json
+{"status":"ok"}
+```
+
+Open the browser interface:
+
+```text
+https://bioops.84-201-181-221.sslip.io/
+```
+
+---
+
+## 20. Agent acceptance prompts
+
+### General Agent
+
+```text
+Hello. What can BioOps help me with?
+```
+
+### Knowledge Agent
+
+```text
+Explain the BioOps orchestrator using indexed project information.
+```
+
+### Review Agent
+
+```text
+Review the Mayaro8/BioOps repository and identify the three most important engineering risks.
+```
+
+### Cluster Health Agent
+
+```text
+Check cluster health.
+```
+
+### Submit Master Agent
+
+```text
+Show the current Submit Master workflow progress.
+```
+
+### Batch Status Agent
+
+```text
+Show the latest batch statuses.
+```
+
+### Storage Agent
+
+```text
+How many objects are in the bucket inventory?
+```
+
+---
+
+## 21. Minimum demonstration sequence
+
+1. Show the active Git branch.
+2. Show the current image tag.
+3. Show Pods, Services, PVCs, and CronJobs in `bioops-dev`.
+4. Submit the knowledge-ingestion workflow.
+5. Show that the workflow reaches `Succeeded`.
+6. Open the BioOps browser interface.
+7. Run one prompt for each required agent.
+8. Submit the Submit Master demo Workflow.
+9. Show the successful Argo execution.
+10. Record the demonstration.
+
+---
+
