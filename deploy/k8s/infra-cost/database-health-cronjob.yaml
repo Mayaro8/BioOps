@@ -1,0 +1,64 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: bioops-database-health-monitor
+  namespace: bioops-dev
+  labels:
+    app: bioops
+    component: database-health-monitor
+    epic: e2
+spec:
+  suspend: true
+  schedule: "*/15 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 600
+      template:
+        metadata:
+          labels:
+            app: bioops
+            component: database-health-monitor
+            epic: e2
+        spec:
+          serviceAccountName: bioops-student
+          restartPolicy: Never
+          nodeSelector:
+            genoteknodetype: fastmri-cpu
+          tolerations:
+            - key: yandex.cloud/preemptible
+              operator: Equal
+              value: "true"
+              effect: NoSchedule
+          containers:
+            - name: monitor
+              image: cr.yandex/crp5l1da4kinv8ofomr5/fastmri-students/bioops:infra-final-periodic-e1-e4-20260713
+              imagePullPolicy: Always
+              command:
+                - python3
+                - -m
+                - bioops.jobs.database_health_monitor
+              envFrom:
+                - configMapRef:
+                    name: bioops-config
+                - secretRef:
+                    name: bioops-secrets
+              env:
+                - name: PYTHONPATH
+                  value: /app/src
+                - name: BIOOPS_ALERT_URL
+                  value: http://bioops-api-internal:8000/internal/alerts
+                - name: BIOOPS_E2_MOCK_PATH
+                  value: /app/data/mock_database_health.json
+              volumeMounts:
+                - name: infra-mocks
+                  mountPath: /app/data
+                  readOnly: true
+          volumes:
+            - name: infra-mocks
+              configMap:
+                name: bioops-infra-mocks

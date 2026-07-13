@@ -1,0 +1,16 @@
+[
+  {
+    "name": "batch-dispatch",
+    "invocations": 400,
+    "baseline_invocations": 100,
+    "errors": 30,
+    "critical_log_errors": 2
+  },
+  {
+    "name": "status-sync",
+    "invocations": 80,
+    "baseline_invocations": 70,
+    "errors": 0,
+    "critical_log_errors": 0
+  }
+]

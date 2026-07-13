@@ -1,0 +1,65 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: bioops-infra-cost-monitor
+  namespace: bioops-dev
+  labels:
+    app: bioops
+    component: infra-cost-monitor
+    epic: e1
+spec:
+  suspend: true
+  schedule: "*/15 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 600
+      template:
+        metadata:
+          labels:
+            app: bioops
+            component: infra-cost-monitor
+            epic: e1
+        spec:
+          serviceAccountName: bioops-student
+          restartPolicy: Never
+          nodeSelector:
+            genoteknodetype: fastmri-cpu
+          tolerations:
+            - key: yandex.cloud/preemptible
+              operator: Equal
+              value: "true"
+              effect: NoSchedule
+          containers:
+            - name: monitor
+              image: cr.yandex/crp5l1da4kinv8ofomr5/fastmri-students/bioops:infra-final-periodic-e1-e4-20260713
+              imagePullPolicy: Always
+              command:
+                - python3
+                - -m
+                - bioops.jobs.infra_cost_monitor
+              envFrom:
+                - configMapRef:
+                    name: bioops-config
+                - secretRef:
+                    name: bioops-secrets
+              env:
+                - name: PYTHONPATH
+                  value: /app/src
+                - name: BIOOPS_ALERT_URL
+                  value: http://bioops-api-internal:8000/internal/alerts
+                - name: ALERT_CHANNEL
+                  value: browser
+              volumeMounts:
+                - name: agents-config
+                  mountPath: /app/configs/agents.yaml
+                  subPath: agents.yaml
+                  readOnly: true
+          volumes:
+            - name: agents-config
+              configMap:
+                name: bioops-agents-config

@@ -1,0 +1,33 @@
+[
+  {
+    "engine": "mongodb",
+    "name": "pipeline-mongo",
+    "reachable": true,
+    "cpu_percent": 42,
+    "memory_percent": 61
+  },
+  {
+    "engine": "mysql",
+    "name": "pipeline-mysql",
+    "reachable": true,
+    "cpu_percent": 91,
+    "memory_percent": 72
+  },
+  {
+    "engine": "clickhouse",
+    "name": "pipeline-clickhouse",
+    "reachable": true,
+    "cpu_percent": 68,
+    "memory_percent": 93,
+    "mutations": [
+      {
+        "id": "mutation_42",
+        "database": "pipeline",
+        "table": "segments",
+        "age_minutes": 55,
+        "is_done": false,
+        "latest_fail_reason": ""
+      }
+    ]
+  }
+]

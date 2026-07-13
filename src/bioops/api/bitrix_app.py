@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from typing import Any
 from urllib.parse import parse_qs
 
@@ -10,6 +11,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from bioops.graph_orchestrator import run_graph
+from bioops.tools.notification_store import NotificationStore
 from bioops.tools.bitrix_sender import BitrixSender
 
 
@@ -22,9 +24,32 @@ app = FastAPI(
 
 bitrix_sender = BitrixSender()
 
+_notification_store: NotificationStore | None = None
+
+
+def get_notification_store() -> NotificationStore:
+    global _notification_store
+
+    if _notification_store is None:
+        db_path = os.getenv(
+            "BIOOPS_ALERT_DB_PATH",
+            "/data/bioops_notifications.sqlite3",
+        )
+        _notification_store = NotificationStore(
+            db_path
+        )
+
+    return _notification_store
+
 
 class ChatRequest(BaseModel):
     message: str
+
+
+class AlertRequest(BaseModel):
+    title: str
+    message: str
+    severity: str = "warning"
 
 
 class ChatResponse(BaseModel):
@@ -65,6 +90,52 @@ CHAT_PAGE = """
     .subtitle {
       margin-top: 0;
       color: #9ca3af;
+    }
+
+    #notification-panel {
+      margin-bottom: 14px;
+      padding: 14px;
+      border: 1px solid #92400e;
+      border-radius: 12px;
+      background: #422006;
+    }
+
+    #notification-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    #notification-items {
+      margin-top: 8px;
+    }
+
+    .notification-item {
+      margin-top: 8px;
+      padding: 10px;
+      border-radius: 8px;
+      background: #78350f;
+      white-space: pre-wrap;
+    }
+
+    .notification-item.info {
+      background: #1e3a5f;
+    }
+
+    .notification-item.critical {
+      background: #7f1d1d;
+    }
+
+    .notification-time {
+      color: #d1d5db;
+      font-size: 0.85rem;
+    }
+
+    .notification-read {
+      min-width: auto;
+      margin-top: 8px;
+      padding: 6px 10px;
+      background: #374151;
     }
 
     #messages {
@@ -140,6 +211,23 @@ CHAT_PAGE = """
       Ask about workflows, batches, cluster health, storage, documentation, or code review.
     </p>
 
+    <section
+      id="notification-panel"
+      aria-live="polite"
+    >
+      <div id="notification-header">
+        <strong>Infrastructure notifications</strong>
+        <span>
+          Unread:
+          <span id="notification-count">0</span>
+        </span>
+      </div>
+
+      <div id="notification-items">
+        No notifications yet.
+      </div>
+    </section>
+
     <section id="messages" aria-live="polite">
       <div class="message assistant">
         BioOps is ready. Enter a question below.
@@ -163,6 +251,10 @@ CHAT_PAGE = """
     const input = document.getElementById("message-input");
     const messages = document.getElementById("messages");
     const button = document.getElementById("send-button");
+    const notificationItems =
+      document.getElementById("notification-items");
+    const notificationCount =
+      document.getElementById("notification-count");
 
     function addMessage(text, className) {
       const element = document.createElement("div");
@@ -171,6 +263,111 @@ CHAT_PAGE = """
       messages.appendChild(element);
       messages.scrollTop = messages.scrollHeight;
     }
+
+    async function markNotificationRead(id) {
+      await fetch(`/alerts/${id}/read`, {
+        method: "POST"
+      });
+
+      await refreshNotifications();
+    }
+
+    async function refreshNotifications() {
+      try {
+        const response = await fetch(
+          "/alerts?limit=10"
+        );
+
+        if (!response.ok) {
+          return;
+        }
+
+        const payload = await response.json();
+
+        notificationCount.textContent =
+          payload.unread;
+
+        notificationItems.replaceChildren();
+
+        if (payload.items.length === 0) {
+          notificationItems.textContent =
+            "No notifications yet.";
+          return;
+        }
+
+        payload.items.forEach((item) => {
+          const element =
+            document.createElement("div");
+
+          element.className =
+            `notification-item ${item.severity}`;
+
+          const title =
+            document.createElement("strong");
+
+          title.textContent =
+            `[${item.severity.toUpperCase()}] ` +
+            item.title;
+
+          const timestamp =
+            document.createElement("div");
+
+          timestamp.className =
+            "notification-time";
+
+          timestamp.textContent =
+            new Date(
+              item.created_at
+            ).toLocaleString();
+
+          const message =
+            document.createElement("div");
+
+          message.textContent = item.message;
+
+          element.append(
+            title,
+            timestamp,
+            message
+          );
+
+          if (!item.is_read) {
+            const readButton =
+              document.createElement("button");
+
+            readButton.type = "button";
+            readButton.className =
+              "notification-read";
+            readButton.textContent =
+              "Mark as read";
+
+            readButton.addEventListener(
+              "click",
+              () => markNotificationRead(
+                item.id
+              )
+            );
+
+            element.appendChild(readButton);
+          }
+
+          notificationItems.appendChild(
+            element
+          );
+        });
+      } catch (error) {
+        console.error(
+          "Could not load notifications",
+          error
+        );
+      }
+    }
+
+    refreshNotifications();
+    setInterval(
+      refreshNotifications,
+      15000
+    );
 
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -226,6 +423,59 @@ CHAT_PAGE = """
 @app.get("/", response_class=HTMLResponse)
 def chat_page() -> str:
     return CHAT_PAGE
+
+
+@app.post("/internal/alerts")
+def create_alert(
+    payload: AlertRequest,
+    request: Request,
+) -> dict:
+    expected_token = os.getenv(
+        "BIOOPS_INTERNAL_ALERT_TOKEN",
+        "",
+    )
+    supplied_token = request.headers.get(
+        "X-BioOps-Alert-Token",
+        "",
+    )
+
+    if (
+        expected_token
+        and supplied_token != expected_token
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Invalid alert token.",
+        )
+
+    return get_notification_store().create(
+        title=payload.title,
+        message=payload.message,
+        severity=payload.severity,
+    )
+
+
+@app.get("/alerts")
+def list_alerts(limit: int = 50) -> dict:
+    store = get_notification_store()
+
+    return {
+        "items": store.list_recent(limit),
+        "unread": store.unread_count(),
+    }
+
+
+@app.post("/alerts/{alert_id}/read")
+def mark_alert_read(alert_id: int) -> dict:
+    try:
+        return get_notification_store().mark_read(
+            alert_id
+        )
+    except KeyError:
+        raise HTTPException(
+            status_code=404,
+            detail="Alert not found.",
+        ) from None
 
 
 @app.get("/health")

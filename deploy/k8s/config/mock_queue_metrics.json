@@ -1,0 +1,16 @@
+[
+  {
+    "name": "pipeline-submit",
+    "depth": 120,
+    "oldest_message_age_seconds": 1800,
+    "messages_in_per_minute": 8,
+    "messages_out_per_minute": 0.5
+  },
+  {
+    "name": "pipeline-results",
+    "depth": 4,
+    "oldest_message_age_seconds": 40,
+    "messages_in_per_minute": 2,
+    "messages_out_per_minute": 5
+  }
+]

@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 
 from bioops.tools.bitrix_tool import BitrixTool
+from bioops.tools.browser_alert import BrowserAlertClient
 
 
 @dataclass
@@ -56,6 +57,28 @@ class AlertTool:
         )
 
     def _send(self, formatted_message: str) -> AlertResult:
+        if self.channel == "browser":
+            if "Severity: critical" in formatted_message:
+                severity = "critical"
+            elif "Severity: warning" in formatted_message:
+                severity = "warning"
+            else:
+                severity = "info"
+
+            result = BrowserAlertClient().send(
+                title="BioOps infrastructure notification",
+                message=formatted_message,
+                severity=severity,
+            )
+
+            return AlertResult(
+                ok=True,
+                channel="browser",
+                message=str(
+                    result.get("id", "stored")
+                ),
+            )
+
         if self.channel == "bitrix":
             bitrix = BitrixTool()
             result = bitrix.send_message(formatted_message)

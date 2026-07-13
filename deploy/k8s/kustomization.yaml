@@ -6,4 +6,4 @@ resources:
   - qdrant
   - bioops-api
   - batch-status
-  - cluster-health
+  - infra-cost

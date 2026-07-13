@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: bioops-api-internal
+  namespace: bioops-dev
+  labels:
+    app: bioops-api
+    component: internal-api
+spec:
+  type: ClusterIP
+  selector:
+    app: bioops-api
+  ports:
+    - name: api
+      port: 8000
+      targetPort: 8000
+      protocol: TCP

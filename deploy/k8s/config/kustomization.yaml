@@ -13,6 +13,12 @@ configMapGenerator:
     files:
       - bucket_inventory.csv=bucket-inventory.csv
 
+  - name: bioops-infra-mocks
+    files:
+      - mock_database_health.json
+      - mock_queue_metrics.json
+      - mock_function_metrics.json
+
 generatorOptions:
   disableNameSuffixHash: true
 
