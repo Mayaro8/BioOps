@@ -7,3 +7,4 @@ resources:
   - bioops-api
   - batch-status
   - infra-cost
+  - cluster-health

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -19,7 +21,23 @@ class PodStatus:
 
 
 class K8sHealthTool:
-    """Read current Kubernetes pod health and recent failures."""
+    """Read current Kubernetes pod health and recent pod errors."""
+
+    ERROR_KEYWORDS = (
+        "forbidden",
+        "oomkilled",
+        "out of memory",
+        "notfounderror",
+        "module not found",
+        "permission denied",
+        "connection refused",
+        "timeout",
+        "traceback",
+        "exception",
+        "error",
+        "failed",
+        "fatal",
+    )
 
     def __init__(
         self,
@@ -43,17 +61,17 @@ class K8sHealthTool:
             config.load_kube_config()
 
     def get_pods(self) -> list[PodStatus]:
-        pods = self.core_api.list_namespaced_pod(
+        response = self.core_api.list_namespaced_pod(
             namespace=self.namespace,
             _request_timeout=self.request_timeout_seconds,
         )
 
         now = datetime.now(timezone.utc)
-        pod_statuses: list[PodStatus] = []
+        results: list[PodStatus] = []
 
-        for pod in pods.items:
+        for pod in response.items:
             labels = pod.metadata.labels or {}
-            started_at = pod.status.start_time
+            started_at = getattr(pod.status, "start_time", None)
 
             runtime_minutes = None
             if started_at is not None:
@@ -62,24 +80,30 @@ class K8sHealthTool:
                     1,
                 )
 
-            pod_statuses.append(
+            results.append(
                 PodStatus(
                     name=pod.metadata.name,
                     namespace=pod.metadata.namespace,
                     phase=pod.status.phase,
                     node_name=pod.spec.node_name,
                     pipeline_step=labels.get("pipeline_step"),
-                    started_at=started_at.isoformat() if started_at else None,
+                    started_at=(
+                        started_at.isoformat()
+                        if started_at is not None
+                        else None
+                    ),
                     runtime_minutes=runtime_minutes,
                 )
             )
 
-        return pod_statuses
+        return results
 
     def get_pod_logs(
         self,
         pod_name: str,
         tail_lines: int | None = None,
+        container_name: str | None = None,
+        since_seconds: int | None = None,
     ) -> str:
         effective_tail_lines = (
             tail_lines
@@ -87,192 +111,268 @@ class K8sHealthTool:
             else self.log_tail_lines
         )
 
+        arguments: dict[str, Any] = {
+            "name": pod_name,
+            "namespace": self.namespace,
+            "tail_lines": effective_tail_lines,
+            "_request_timeout": self.request_timeout_seconds,
+        }
+
+        if container_name:
+            arguments["container"] = container_name
+
+        if since_seconds is not None:
+            arguments["since_seconds"] = since_seconds
+
         try:
             logs = self.core_api.read_namespaced_pod_log(
-                name=pod_name,
-                namespace=self.namespace,
-                tail_lines=effective_tail_lines,
-                _request_timeout=self.request_timeout_seconds,
+                **arguments,
+            )
+        except ApiException as error:
+            return (
+                f"Could not read logs for {pod_name}: "
+                f"{error.reason}"
             )
 
-            if isinstance(logs, bytes):
-                return logs.decode("utf-8", errors="replace")
+        if isinstance(logs, bytes):
+            return logs.decode("utf-8", errors="replace")
 
-            if isinstance(logs, str) and logs.startswith("b'"):
-                return (
-                    logs.removeprefix("b'")
-                    .removesuffix("'")
-                    .replace("\\n", "\n")
+        if isinstance(logs, str) and logs.startswith("b'"):
+            return (
+                logs.removeprefix("b'")
+                .removesuffix("'")
+                .replace("\\n", "\n")
+            )
+
+        if isinstance(logs, str) and logs.startswith('b"'):
+            return (
+                logs.removeprefix('b"')
+                .removesuffix('"')
+                .replace("\\n", "\n")
+            )
+
+        return str(logs)
+
+    def _container_statuses(self, pod: Any) -> list[Any]:
+        return [
+            *(
+                getattr(
+                    pod.status,
+                    "init_container_statuses",
+                    None,
                 )
-
-            if isinstance(logs, str) and logs.startswith('b"'):
-                return (
-                    logs.removeprefix('b"')
-                    .removesuffix('"')
-                    .replace("\\n", "\n")
+                or []
+            ),
+            *(
+                getattr(
+                    pod.status,
+                    "container_statuses",
+                    None,
                 )
-
-            return str(logs)
-
-        except ApiException as exc:
-            return f"Could not read logs for {pod_name}: {exc.reason}"
+                or []
+            ),
+        ]
 
     def _pod_event_time(self, pod: Any) -> datetime | None:
         event_times: list[datetime] = []
 
-        if pod.status.start_time is not None:
-            event_times.append(pod.status.start_time)
+        start_time = getattr(pod.status, "start_time", None)
+        if start_time is not None:
+            event_times.append(start_time)
 
-        statuses = [
-            *(getattr(pod.status, "init_container_statuses", None) or []),
-            *(getattr(pod.status, "container_statuses", None) or []),
-        ]
+        for container_status in self._container_statuses(pod):
+            state = getattr(container_status, "state", None)
+            terminated = getattr(state, "terminated", None)
 
-        for container_status in statuses:
-            terminated = container_status.state.terminated
-
-            if terminated is not None and terminated.finished_at is not None:
+            if (
+                terminated is not None
+                and terminated.finished_at is not None
+            ):
                 event_times.append(terminated.finished_at)
 
         return max(event_times) if event_times else None
 
-    def _is_recent(self, pod: Any) -> bool:
-        event_time = self._pod_event_time(pod)
-
-        if event_time is None:
-            return True
-
-        age_minutes = (
-            datetime.now(timezone.utc) - event_time
-        ).total_seconds() / 60
-
-        return age_minutes <= self.recent_error_minutes
-
-    def _extract_error_summary(self, logs: str) -> str | None:
-        if logs.startswith("Could not read logs"):
-            return None
-
-        keywords = (
-            "forbidden",
-            "oomkilled",
-            "notfounderror",
-            "permission denied",
-            "connection refused",
-            "timeout",
-            "exception",
-            "error",
-            "failed",
+    def _pod_sort_key(self, pod: Any) -> datetime:
+        return self._pod_event_time(pod) or datetime.min.replace(
+            tzinfo=timezone.utc
         )
 
-        for raw_line in reversed(logs.splitlines()):
-            line = " ".join(raw_line.strip().split())
-            lowered = line.lower()
-
-            if not line:
-                continue
-
-            if "forbidden" in lowered:
-                return "Kubernetes RBAC denied the requested operation."
-
-            if "oomkilled" in lowered:
-                return "Container was terminated because it exceeded its memory limit."
-
-            if any(keyword in lowered for keyword in keywords):
-                if len(line) > 220:
-                    line = f"{line[:217]}..."
-
-                return line
-
-        return None
-
     def _container_problem(self, pod: Any) -> str | None:
-        statuses = [
-            *(getattr(pod.status, "init_container_statuses", None) or []),
-            *(getattr(pod.status, "container_statuses", None) or []),
-        ]
-
-        for container_status in statuses:
-            waiting = container_status.state.waiting
+        for container_status in self._container_statuses(pod):
+            state = getattr(container_status, "state", None)
+            waiting = getattr(state, "waiting", None)
 
             if waiting is not None:
                 detail = waiting.reason or "unknown reason"
 
                 if waiting.message:
-                    message = " ".join(waiting.message.split())
+                    message = " ".join(
+                        waiting.message.split()
+                    )
                     detail = f"{detail}: {message[:160]}"
 
                 return (
-                    f"{pod.metadata.name}/{container_status.name} "
-                    f"is waiting: {detail}"
+                    f"{pod.metadata.name}/"
+                    f"{container_status.name} is waiting: "
+                    f"{detail}"
                 )
 
-        for container_status in statuses:
-            terminated = container_status.state.terminated
+        for container_status in self._container_statuses(pod):
+            state = getattr(container_status, "state", None)
+            terminated = getattr(state, "terminated", None)
 
-            if terminated is not None and terminated.exit_code != 0:
+            if (
+                terminated is not None
+                and terminated.exit_code != 0
+            ):
                 reason = terminated.reason or "Error"
 
                 return (
-                    f"{pod.metadata.name}/{container_status.name} "
-                    f"terminated with {reason}, exit code "
+                    f"{pod.metadata.name}/"
+                    f"{container_status.name} terminated "
+                    f"with {reason}, exit code "
                     f"{terminated.exit_code}"
                 )
 
         return None
 
-    def get_recent_errors(self) -> list[str]:
+    def _extract_error_lines(
+        self,
+        logs: str,
+        limit: int,
+    ) -> list[str]:
+        if logs.startswith("Could not read logs"):
+            return []
+
+        results: list[str] = []
+
+        # Reverse traversal means the newest matching lines are
+        # returned first.
+        for raw_line in reversed(logs.splitlines()):
+            line = " ".join(raw_line.strip().split())
+
+            if not line:
+                continue
+
+            lowered = line.lower()
+
+            if not any(
+                keyword in lowered
+                for keyword in self.ERROR_KEYWORDS
+            ):
+                continue
+
+            if len(line) > 220:
+                line = f"{line[:217]}..."
+
+            if line not in results:
+                results.append(line)
+
+            if len(results) >= limit:
+                break
+
+        return results
+
+    def get_recent_errors(
+        self,
+        limit: int = 3,
+    ) -> list[str]:
+        """Return up to the latest `limit` pod errors."""
+
+        if limit <= 0:
+            return []
+
         try:
-            pods = self.core_api.list_namespaced_pod(
+            response = self.core_api.list_namespaced_pod(
                 namespace=self.namespace,
                 _request_timeout=self.request_timeout_seconds,
             )
-        except ApiException as exc:
+        except ApiException as error:
             return [
-                f"Could not read pods from namespace "
-                f"{self.namespace}: {exc.reason}"
+                (
+                    "Could not read pods from namespace "
+                    f"{self.namespace}: {error.reason}"
+                )
             ]
 
         errors: list[str] = []
+        seen: set[str] = set()
 
-        for pod in pods.items:
+        pods = sorted(
+            response.items,
+            key=self._pod_sort_key,
+            reverse=True,
+        )
+
+        since_seconds = self.recent_error_minutes * 60
+
+        def add_error(message: str) -> bool:
+            if message not in seen:
+                seen.add(message)
+                errors.append(message)
+
+            return len(errors) >= limit
+
+        for pod in pods:
             phase = pod.status.phase
-            container_problem = self._container_problem(pod)
 
-            # Running pods are only reported when a container is waiting.
-            if phase == "Running" and container_problem is None:
-                continue
-
-            # Successful pods are historical noise.
+            # Successful historical jobs are not current errors.
             if phase == "Succeeded":
                 continue
 
-            # Old failures are omitted from a current-health report.
-            if not self._is_recent(pod) and container_problem is None:
+            container_problem = self._container_problem(pod)
+
+            if container_problem and add_error(container_problem):
+                return errors
+
+            statuses = self._container_statuses(pod)
+
+            # A running pod with no status data is ignored rather
+            # than producing a misleading log error.
+            if phase == "Running" and not statuses:
                 continue
 
-            summary = container_problem
+            container_names = [
+                status.name
+                for status in statuses
+                if getattr(status, "name", None)
+            ]
 
-            # Read logs only for simple single-container failed pods.
-            container_statuses = (
-                getattr(pod.status, "container_statuses", None) or []
-            )
+            if not container_names:
+                container_names = [None]
 
-            if (
-                summary is None
-                and phase == "Failed"
-                and len(container_statuses) <= 1
-            ):
-                log_summary = self._extract_error_summary(
-                    self.get_pod_logs(pod.metadata.name)
+            found_log_error = False
+
+            for container_name in container_names:
+                logs = self.get_pod_logs(
+                    pod_name=pod.metadata.name,
+                    container_name=container_name,
+                    since_seconds=since_seconds,
                 )
 
-                if log_summary:
-                    summary = f"{pod.metadata.name} failed: {log_summary}"
+                remaining = limit - len(errors)
 
-            if summary is None:
-                summary = f"{pod.metadata.name} is in phase {phase}"
+                for log_error in self._extract_error_lines(
+                    logs,
+                    remaining,
+                ):
+                    found_log_error = True
 
-            if summary not in errors:
-                errors.append(summary)
+                    source = pod.metadata.name
+                    if container_name:
+                        source = f"{source}/{container_name}"
+
+                    if add_error(f"{source}: {log_error}"):
+                        return errors
+
+            if (
+                phase == "Failed"
+                and container_problem is None
+                and not found_log_error
+            ):
+                if add_error(
+                    f"{pod.metadata.name} is in phase Failed"
+                ):
+                    return errors
 
         return errors

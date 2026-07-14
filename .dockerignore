@@ -24,3 +24,5 @@ k8s/argo/local/
 k8s/argo/real/
 k8s/argo/company/
 *.zip
+*.notifications-backup
+*.before-collapsible-notifications

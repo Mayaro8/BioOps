@@ -31,7 +31,7 @@ spec:
           effect: NoSchedule
       containers:
         - name: bioops-api
-          image: cr.yandex/crp5l1da4kinv8ofomr5/fastmri-students/bioops:infra-final-periodic-e1-e4-20260713
+          image: cr.yandex/crp5l1da4kinv8ofomr5/fastmri-students/bioops:infra-final-cluster-health-20260714-115127
           imagePullPolicy: Always
           command:
             - python

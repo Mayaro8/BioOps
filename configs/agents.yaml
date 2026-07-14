@@ -13,6 +13,7 @@ agents:
     namespace: bioops
     request_timeout_seconds: 5
     log_tail_lines: 50
+    recent_error_minutes: 60
     cost:
       mode: local_free
       currency: rub

@@ -1,0 +1,49 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: bioops-cluster-health-reader
+  namespace: bioops-dev
+  labels:
+    app: bioops
+    component: cluster-health-monitor
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+    verbs:
+      - get
+      - list
+
+  - apiGroups:
+      - ""
+    resources:
+      - pods/log
+    verbs:
+      - get
+
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - get
+      - list
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: bioops-cluster-health-reader
+  namespace: bioops-dev
+  labels:
+    app: bioops
+    component: cluster-health-monitor
+subjects:
+  - kind: ServiceAccount
+    name: bioops-student
+    namespace: bioops-dev
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: bioops-cluster-health-reader

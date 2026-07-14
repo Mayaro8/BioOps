@@ -1,0 +1,79 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: bioops-cluster-health-monitor
+  namespace: bioops-dev
+  labels:
+    app: bioops
+    component: cluster-health-monitor
+    epic: c
+spec:
+  schedule: "*/15 * * * *"
+  suspend: true
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 300
+
+      template:
+        metadata:
+          labels:
+            app: bioops
+            component: cluster-health-monitor
+            epic: c
+
+        spec:
+          serviceAccountName: bioops-student
+          restartPolicy: Never
+
+          nodeSelector:
+            genoteknodetype: fastmri-cpu
+
+          tolerations:
+            - key: yandex.cloud/preemptible
+              operator: Equal
+              value: "true"
+              effect: NoSchedule
+
+          containers:
+            - name: monitor
+              image: cr.yandex/crp5l1da4kinv8ofomr5/fastmri-students/bioops:infra-final-cluster-health-20260714-115127
+              imagePullPolicy: Always
+
+              command:
+                - python3
+                - -m
+                - bioops.jobs.cluster_health_monitor
+
+              envFrom:
+                - configMapRef:
+                    name: bioops-config
+
+                - secretRef:
+                    name: bioops-secrets
+
+              env:
+                - name: PYTHONPATH
+                  value: /app/src
+
+                - name: ALERT_CHANNEL
+                  value: browser
+
+                - name: BIOOPS_ALERT_URL
+                  value: http://bioops-api:8000/internal/alerts
+
+              volumeMounts:
+                - name: agents-config
+                  mountPath: /app/configs/agents.yaml
+                  subPath: agents.yaml
+                  readOnly: true
+
+          volumes:
+            - name: agents-config
+              configMap:
+                name: bioops-agents-config

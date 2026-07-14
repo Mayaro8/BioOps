@@ -201,7 +201,34 @@ CHAT_PAGE = """
       cursor: wait;
       opacity: 0.6;
     }
-  </style>
+  
+/* BIOOPS_COLLAPSIBLE_ALERTS_CSS */
+#notification-header {
+  cursor: pointer;
+  user-select: none;
+}
+
+#notification-header::before {
+  content: "▶";
+  display: inline-block;
+  margin-right: 8px;
+  font-size: 0.75rem;
+}
+
+#notification-panel[data-open="true"] #notification-header::before {
+  content: "▼";
+}
+
+#notification-panel[data-open="false"] #notification-items {
+  display: none;
+}
+
+#notification-items {
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+</style>
 </head>
 
 <body>
@@ -414,7 +441,53 @@ CHAT_PAGE = """
         form.requestSubmit();
       }
     });
-  </script>
+  
+/* BIOOPS_COLLAPSIBLE_ALERTS_JS */
+(function () {
+  function installCollapsibleNotifications() {
+    const panel = document.getElementById("notification-panel");
+    const header = document.getElementById("notification-header");
+    const items = document.getElementById("notification-items");
+
+    if (!panel || !header || !items) {
+      console.warn("Notification panel elements were not found.");
+      return;
+    }
+
+    panel.dataset.open = "false";
+
+    header.setAttribute("role", "button");
+    header.setAttribute("tabindex", "0");
+    header.setAttribute("aria-expanded", "false");
+
+    function togglePanel() {
+      const willOpen = panel.dataset.open !== "true";
+
+      panel.dataset.open = String(willOpen);
+      header.setAttribute("aria-expanded", String(willOpen));
+    }
+
+    header.addEventListener("click", togglePanel);
+
+    header.addEventListener("keydown", function (event) {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        togglePanel();
+      }
+    });
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener(
+      "DOMContentLoaded",
+      installCollapsibleNotifications
+    );
+  } else {
+    installCollapsibleNotifications();
+  }
+})();
+
+</script>
 </body>
 </html>
 """

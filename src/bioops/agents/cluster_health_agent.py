@@ -277,7 +277,7 @@ class ClusterHealthAgent(BaseAgent):
         )
 
         if errors:
-            lines.extend(f"- {error}" for error in errors[:5])
+            lines.extend(f"- {error}" for error in errors[:3])
         else:
             lines.append("- None.")
 
