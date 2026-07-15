@@ -66,8 +66,17 @@ def _latest_workflow(
     namespace: str,
     workflow_prefix: str,
     workflow_template: str | None,
+    workflow_name: str | None = None,
 ) -> dict[str, Any] | None:
     api = client.CustomObjectsApi()
+    if workflow_name:
+        return api.get_namespaced_custom_object(
+            group="argoproj.io",
+            version="v1alpha1",
+            namespace=namespace,
+            plural="workflows",
+            name=workflow_name,
+        )
     workflows = api.list_namespaced_custom_object(
         group="argoproj.io",
         version="v1alpha1",
@@ -163,6 +172,7 @@ def render_failure_report(
     workflow_prefix: str,
     workflow_template: str | None,
     log_tail_lines: int,
+    workflow_name: str | None = None,
 ) -> str:
     _load_kube_config()
 
@@ -170,6 +180,7 @@ def render_failure_report(
         namespace=namespace,
         workflow_prefix=workflow_prefix,
         workflow_template=workflow_template,
+        workflow_name=workflow_name,
     )
 
     if workflow is None:
@@ -275,6 +286,7 @@ def main() -> None:
     parser.add_argument("--namespace", default="argo")
     parser.add_argument("--workflow-prefix", default="bioops-submit-master-target")
     parser.add_argument("--workflow-template", default="bioops-submit-master-local")
+    parser.add_argument("--workflow-name", required=True)
     parser.add_argument("--log-tail-lines", type=int, default=80)
     args = parser.parse_args()
 
@@ -283,6 +295,7 @@ def main() -> None:
         workflow_prefix=args.workflow_prefix,
         workflow_template=args.workflow_template,
         log_tail_lines=args.log_tail_lines,
+        workflow_name=args.workflow_name,
     )
 
     print("=== D4 failure report ===")

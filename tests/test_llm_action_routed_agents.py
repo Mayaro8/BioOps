@@ -88,17 +88,17 @@ class FakeInventoryTool:
         return (value or "").strip().strip("/")
 
 
-def test_submit_master_progress_action_calls_monitor():
+def test_submit_master_batch_action_calls_monitor():
     agent = SubmitMasterAgent.__new__(SubmitMasterAgent)
-    agent.action_router = FakeActionRouter("progress")
-    agent.monitor = SimpleNamespace(render_latest_progress=lambda: "progress report")
+    agent.action_router = FakeActionRouter("batch_status", {"batch_id": "B104"})
+    agent.monitor = SimpleNamespace(render_batch_status=lambda value: f"batch report {value}")
     agent.launcher = None
     agent.d4_namespace = "bioops-dev"
     agent.d4_workflow_prefix = "bioops-submit-master"
     agent.d4_workflow_template = "bioops-submit-master-local"
     agent.d4_log_tail_lines = 80
 
-    assert agent.run("flexible wording") == "progress report"
+    assert agent.run("flexible wording") == "batch report B104"
 
 
 def test_submit_master_action_router_failure_is_fail_closed():

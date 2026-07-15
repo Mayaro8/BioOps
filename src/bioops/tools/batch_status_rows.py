@@ -41,6 +41,7 @@ def workflow_to_batch_status_row(
     batch_id = (
         parameters.get("batch_id")
         or parameters.get("BATCH_ID")
+        or labels.get("bioops.dev/batch-id")
         or labels.get("bioops/batch-id")
         or labels.get("batch_id")
         or ""
@@ -60,9 +61,12 @@ def workflow_to_batch_status_row(
         "stage": str(parameters.get("stage") or parameters.get("STAGE") or ""),
         "mode": str(parameters.get("mode") or parameters.get("MODE") or ""),
         "sample_ids": str(
-            parameters.get("sample_ids")
+            parameters.get("sample_id")
+            or parameters.get("SAMPLE_ID")
+            or parameters.get("sample_ids")
             or parameters.get("SAMPLE_IDS")
             or parameters.get("samples")
+            or labels.get("bioops.dev/sample-id")
             or ""
         ),
         "status": str(status.get("phase") or "Unknown"),

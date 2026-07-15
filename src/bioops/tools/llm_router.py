@@ -124,7 +124,7 @@ class LLMRouterTool:
             "submit_master": (
                 "Submit Master and Argo SubmitMaster operations: D1 config generation, "
                 "D2 UI/launch preparation, D3 progress, D4 failure diagnosis, "
-                "or D5 safe retry instructions"
+                "or D5 safe retry with explicit confirmation and sample targeting"
             ),
             "batch_status": (
                 "persisted batch status records: latest batch status, status of a specific "

@@ -29,7 +29,7 @@ agents:
 
   submit_master:
     enabled: true
-    description: Launches, monitors, reports, and provides safe retry instructions for Submit Master Argo workflows.
+    description: Launches, monitors, reports, and performs explicitly confirmed targeted retries for Submit Master Argo workflows.
     argo_namespace: bioops-dev
     argo_service_name: argo-server
     argo_local_port: 2746
@@ -37,7 +37,12 @@ agents:
     argo_ui_url: https://158.160.184.15:2746
     argo_workflow_template: bioops-submit-master-local
     workflow_name_prefix: bioops-submit-master
-    recent_workflow_limit: 5
+    batch_label: bioops.dev/batch-id
+    sample_label: bioops.dev/sample-id
+    workflow_page_size: 100
+    pod_page_size: 200
+    max_listed_items: 10
+    d5_max_retries: 2
     step_patterns:
       config-creator:
         - config-creator
@@ -49,6 +54,11 @@ agents:
       haplotypecaller:
         - haplotypecaller
         - haplotype-caller
+      gvcf-to-vcf:
+        - gvcf-to-vcf
+        - gvcf_to_vcf
+      beagle:
+        - beagle
       transfer-vcf:
         - transfer-vcf
         - transfer_vcf
@@ -64,7 +74,7 @@ agents:
     argo_namespace: bioops-dev
     argo_workflow_template: bioops-submit-master-local
     workflow_name_prefix: bioops-submit-master
-    recent_workflow_limit: 20
+    workflow_label_selector: bioops.dev/workload=submit-master
     sync_interval_minutes: 30
     stale_after_minutes: 30
     google_sheet:

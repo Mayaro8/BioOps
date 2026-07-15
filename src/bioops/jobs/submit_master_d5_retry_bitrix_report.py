@@ -117,6 +117,16 @@ def _list_workflows(api: client.CustomObjectsApi, namespace: str) -> list[dict[s
     return response.get("items", [])
 
 
+def _get_workflow(api, namespace, workflow_name):
+    return api.get_namespaced_custom_object(
+        group="argoproj.io",
+        version="v1alpha1",
+        namespace=namespace,
+        plural="workflows",
+        name=workflow_name,
+    )
+
+
 def _workflow_matches(
     workflow: dict[str, Any],
     workflow_prefix: str,
@@ -148,7 +158,10 @@ def _latest_matching_workflow(
     namespace: str,
     workflow_prefix: str,
     workflow_template: str | None,
+    workflow_name: str | None = None,
 ) -> dict[str, Any] | None:
+    if workflow_name:
+        return _get_workflow(api, namespace, workflow_name)
     workflows = _list_workflows(api, namespace)
 
     matches = [
@@ -214,15 +227,26 @@ def _retry_decision(workflow: dict[str, Any]) -> tuple[bool, str]:
     )
 
 
+def assess_workflow_retry(*, namespace, workflow_name):
+    _load_kube_config()
+    workflow = _get_workflow(
+        client.CustomObjectsApi(),
+        namespace,
+        workflow_name,
+    )
+    return _retry_decision(workflow)
+
+
 def _safe_label_value(value: str) -> str:
     cleaned = re.sub(r"[^a-z0-9.-]+", "-", value.lower()).strip("-.")
     return cleaned[:63].strip("-.") or "unknown"
 
 
-def _safe_generate_name(old_name: str) -> str:
-    cleaned = re.sub(r"[^a-z0-9-]+", "-", old_name.lower()).strip("-")
-    cleaned = cleaned[:45].strip("-") or "bioops-submit-master"
-    return f"{cleaned}-d5-retry-"
+def _safe_retry_name(root: str, attempt: int) -> str:
+    cleaned = re.sub(r"[^a-z0-9-]+", "-", root.lower()).strip("-")
+    suffix = f"-d5-retry-{attempt}"
+    cleaned = cleaned[: 63 - len(suffix)].strip("-") or "submit-master"
+    return f"{cleaned}{suffix}"
 
 
 def _retry_metadata(workflow: dict[str, Any]) -> tuple[str, int]:
@@ -247,7 +271,16 @@ def _has_active_retry(
     root_workflow: str,
     current_workflow_name: str,
 ) -> bool:
-    workflows = _list_workflows(api, namespace)
+    response = api.list_namespaced_custom_object(
+        group="argoproj.io",
+        version="v1alpha1",
+        namespace=namespace,
+        plural="workflows",
+        label_selector=(
+            f"bioops.dev/d5-root={_safe_label_value(root_workflow)}"
+        ),
+    )
+    workflows = response.get("items", []) or []
 
     for workflow in workflows:
         metadata = workflow.get("metadata", {})
@@ -284,16 +317,44 @@ def _resubmit_workflow(
     # If the old workflow was manually stopped, do not copy the stop instruction.
     new_spec.pop("shutdown", None)
 
+    parameters = new_spec.setdefault(
+        "arguments", {}
+    ).setdefault("parameters", [])
+    attempt = next(
+        (
+            item for item in parameters
+            if isinstance(item, dict)
+            and item.get("name") == "attempt"
+        ),
+        None,
+    )
+    if attempt is None:
+        parameters.append({
+            "name": "attempt",
+            "value": str(next_retry_count),
+        })
+    else:
+        attempt["value"] = str(next_retry_count)
+
+    old_labels = metadata.get("labels", {}) or {}
+    labels = {
+        key: value
+        for key, value in old_labels.items()
+        if key.startswith("bioops.dev/")
+    }
+    labels.update({
+        "bioops.dev/d5-resubmit": "true",
+        "bioops.dev/d5-root": _safe_label_value(root_workflow),
+        "bioops.dev/attempt": str(next_retry_count),
+    })
+
     body = {
         "apiVersion": "argoproj.io/v1alpha1",
         "kind": "Workflow",
         "metadata": {
-            "generateName": _safe_generate_name(old_name),
+            "name": _safe_retry_name(root_workflow, next_retry_count),
             "namespace": namespace,
-            "labels": {
-                "bioops.dev/d5-resubmit": "true",
-                "bioops.dev/d5-root": _safe_label_value(root_workflow),
-            },
+            "labels": labels,
             "annotations": {
                 "bioops.dev/d5-root-workflow": root_workflow,
                 "bioops.dev/d5-parent-workflow": old_name,
@@ -321,6 +382,7 @@ def render_d5_report(
     auto_retry: bool,
     max_retries: int,
     force_retry: bool,
+    workflow_name: str | None = None,
 ) -> str:
     _load_kube_config()
     api = client.CustomObjectsApi()
@@ -330,6 +392,7 @@ def render_d5_report(
         namespace=namespace,
         workflow_prefix=workflow_prefix,
         workflow_template=workflow_template,
+        workflow_name=workflow_name,
     )
 
     if workflow is None:
@@ -433,6 +496,7 @@ def main() -> None:
     parser.add_argument("--namespace", default="argo")
     parser.add_argument("--workflow-prefix", default="bioops-submit-master-target")
     parser.add_argument("--workflow-template", default="bioops-submit-master-local")
+    parser.add_argument("--workflow-name", required=True)
     parser.add_argument("--auto-retry", action="store_true")
     parser.add_argument("--max-retries", type=int, default=2)
     parser.add_argument("--force-retry", action="store_true")
@@ -445,6 +509,7 @@ def main() -> None:
         auto_retry=args.auto_retry,
         max_retries=args.max_retries,
         force_retry=args.force_retry,
+        workflow_name=args.workflow_name,
     )
 
     print("=== D5 auto-retry report ===")

@@ -10,6 +10,20 @@ spec:
   serviceAccountName: bioops-student
   entrypoint: submit-master-demo
 
+  workflowMetadata:
+    labels:
+      bioops.dev/workload: submit-master
+      bioops.dev/batch-id: "{{workflow.parameters.batch_id}}"
+      bioops.dev/sample-id: "{{workflow.parameters.sample_id}}"
+      bioops.dev/attempt: "{{workflow.parameters.attempt}}"
+
+  podMetadata:
+    labels:
+      bioops.dev/workload: submit-master
+      bioops.dev/batch-id: "{{workflow.parameters.batch_id}}"
+      bioops.dev/sample-id: "{{workflow.parameters.sample_id}}"
+      bioops.dev/attempt: "{{workflow.parameters.attempt}}"
+
   nodeSelector:
     genoteknodetype: fastmri-cpu
 
@@ -23,8 +37,12 @@ spec:
     parameters:
       - name: batch_id
         value: batch-demo-001
+      - name: sample_id
+        value: sample1
+      - name: attempt
+        value: "0"
       - name: samples
-        value: sample1,sample2
+        value: sample1
       - name: stage
         value: "2"
       - name: mode
@@ -40,6 +58,10 @@ spec:
               parameters:
                 - name: batch_id
                   value: "{{workflow.parameters.batch_id}}"
+                - name: sample_id
+                  value: "{{workflow.parameters.sample_id}}"
+                - name: attempt
+                  value: "{{workflow.parameters.attempt}}"
                 - name: samples
                   value: "{{workflow.parameters.samples}}"
                 - name: stage
@@ -63,11 +85,13 @@ spec:
       inputs:
         parameters:
           - name: batch_id
+          - name: sample_id
+          - name: attempt
           - name: samples
           - name: stage
           - name: mode
       container:
-        image: cr.yandex/crp5l1da4kinv8ofomr5/fastmri-students/bioops:k8s-demo-llm-routing-20260710
+        image: cr.yandex/crp5l1da4kinv8ofomr5/fastmri-students/bioops:submit-master-20260715-192759
         imagePullPolicy: Always
         command:
           - python3
@@ -78,6 +102,8 @@ spec:
 
             config = {
                 "batch_id": "{{inputs.parameters.batch_id}}",
+                "sample_id": "{{inputs.parameters.sample_id}}",
+                "attempt": "{{inputs.parameters.attempt}}",
                 "samples": "{{inputs.parameters.samples}}".split(","),
                 "stage": "{{inputs.parameters.stage}}",
                 "mode": "{{inputs.parameters.mode}}",
@@ -105,7 +131,7 @@ spec:
         parameters:
           - name: generated-config
       container:
-        image: cr.yandex/crp5l1da4kinv8ofomr5/fastmri-students/bioops:k8s-demo-llm-routing-20260710
+        image: cr.yandex/crp5l1da4kinv8ofomr5/fastmri-students/bioops:submit-master-20260715-192759
         imagePullPolicy: Always
         env:
           - name: SUBMIT_MASTER_CONFIG
@@ -123,6 +149,8 @@ spec:
 
             required = {
                 "batch_id",
+                "sample_id",
+                "attempt",
                 "samples",
                 "stage",
                 "mode",
