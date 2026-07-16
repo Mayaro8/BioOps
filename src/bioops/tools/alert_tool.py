@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 
 from bioops.tools.bitrix_tool import BitrixTool
 from bioops.tools.browser_alert import BrowserAlertClient
+from bioops.tools.time_format import now_moscow
 
 
 @dataclass
@@ -47,7 +48,7 @@ class AlertTool:
         message: str,
         severity: str,
     ) -> str:
-        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        timestamp = now_moscow().strftime("%Y-%m-%d %H:%M:%S MSK")
 
         return (
             f"{prefix} {title}\n"

@@ -10,6 +10,7 @@ import yaml
 from bioops.tools.batch_status_argo import BatchStatusArgoScanner
 from bioops.tools.batch_status_rows import workflows_to_batch_status_rows
 from bioops.tools.batch_status_store import BatchStatusStore
+from bioops.tools.time_format import format_moscow_fields
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -92,7 +93,10 @@ def main() -> None:
     # are configured in the image.
     from bioops.tools.google_sheet_status_sync import GoogleSheetStatusSync
 
-    sheet_rows = store.list_rows(limit=args.sheet_limit)
+    sheet_rows = [
+        format_moscow_fields(row)
+        for row in store.list_rows(limit=args.sheet_limit)
+    ]
 
     sync = GoogleSheetStatusSync(
         spreadsheet_id=sheet_config.get("spreadsheet_id", ""),
@@ -167,7 +171,8 @@ def print_table(rows: list[dict[str, str]]) -> None:
 
     print("\t".join(columns))
     for row in rows:
-        print("\t".join(row.get(column, "") for column in columns))
+        display_row = format_moscow_fields(row)
+        print("\t".join(display_row.get(column, "") for column in columns))
 
 
 if __name__ == "__main__":

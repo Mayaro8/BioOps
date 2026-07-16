@@ -13,6 +13,7 @@ from bioops.tools.llm_action_router import (
     LLMActionRouter,
     format_action_routing_error,
 )
+from bioops.tools.time_format import format_moscow_datetime
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -147,9 +148,9 @@ class BatchStatusAgent(BaseAgent):
                     f"   Stage: {row.get('stage') or '-'}",
                     f"   Mode: {row.get('mode') or '-'}",
                     f"   Samples: {row.get('sample_ids') or '-'}",
-                    f"   Started: {row.get('started_at') or '-'}",
-                    f"   Finished: {row.get('finished_at') or '-'}",
-                    f"   Last checked: {row.get('last_checked_at') or '-'}",
+                    f"   Started: {format_moscow_datetime(row.get('started_at'))}",
+                    f"   Finished: {format_moscow_datetime(row.get('finished_at'))}",
+                    f"   Last checked: {format_moscow_datetime(row.get('last_checked_at'))}",
                 ]
             )
             error_message = row.get("error_message") or ""
@@ -243,7 +244,7 @@ class BatchStatusAgent(BaseAgent):
             f"progress {row.get('progress') or '-'}, "
             f"step {row.get('current_step') or '-'}, "
             f"workflow {row.get('workflow_name') or '-'}, "
-            f"checked {row.get('last_checked_at') or '-'}"
+            f"checked {format_moscow_datetime(row.get('last_checked_at'))}"
         )
         error_message = row.get("error_message") or ""
         if error_message:

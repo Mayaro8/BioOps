@@ -8,6 +8,7 @@ metadata:
     app.kubernetes.io/part-of: bioops
 spec:
   schedule: "*/30 * * * *"
+  timeZone: "Europe/Moscow"
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 300
   successfulJobsHistoryLimit: 3
@@ -34,7 +35,7 @@ spec:
             effect: NoSchedule
           containers:
           - name: batch-status-sync
-            image: cr.yandex/crp5l1da4kinv8ofomr5/fastmri-students/bioops:k8s-demo-llm-routing-20260710
+            image: cr.yandex/crp5l1da4kinv8ofomr5/fastmri-students/bioops:bioops-20260716-130405-msk
             imagePullPolicy: Always
             command:
             - /bin/sh

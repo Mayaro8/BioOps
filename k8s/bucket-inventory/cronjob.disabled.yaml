@@ -20,6 +20,7 @@ metadata:
 spec:
   suspend: true
   schedule: "0 3 * * *"
+  timeZone: "Europe/Moscow"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3

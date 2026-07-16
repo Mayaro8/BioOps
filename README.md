@@ -92,8 +92,8 @@ Reads live Kubernetes data and reports:
 - container readiness;
 - restarts;
 - recent errors;
-- active pipeline steps;
-- runtime;
+- active pipeline steps identified by `pipeline_step` labels;
+- runtime for active pipeline Pods;
 - ETA where configured;
 - cost where available.
 
@@ -103,7 +103,10 @@ Example:
 Check cluster health.
 ```
 
-The Cluster Health Agent is read-only. It does not restart Pods.
+The Cluster Health Agent separates BioOps infrastructure Pods from labeled
+pipeline Pods. Its scheduled monitor sends browser warnings for recent Pod
+errors and browser status reports while pipeline Pods are active. It is
+read-only and does not restart Pods.
 
 ### Review Agent
 
@@ -125,16 +128,17 @@ The Review Agent does not approve, reject, comment on, or modify pull requests.
 
 ### Submit Master Agent
 
-Supports Submit Master operations through Argo Workflows.
+Supports explicit batch, sample, and workflow operations through Argo
+Workflows.
 
 Epic D consists of:
 
 ```text
 D1 — generate a Submit Master configuration
 D2 — launch Submit Master
-D3 — monitor status, progress, errors, logs, runtime, cost, and ETA
-D4 — report failed Pods or workflow nodes
-D5 — safely retry a failed Workflow
+D3 — aggregate status, progress, step distribution, runtime, cost, and ETA
+D4 — report failed Pods or workflow nodes for a selected Workflow
+D5 — safely retry a failed sample Workflow after exact confirmation
 ```
 
 The current repository contains a demonstration WorkflowTemplate at:
@@ -181,15 +185,14 @@ Reads CSV bucket inventory data and reports:
 
 ## 4. Current container image
 
-The canonical image tag is:
+The currently deployed BioOps API and Submit Master image tag is:
 
 ```bash
-IMAGE="cr.yandex/crp5l1da4kinv8ofomr5/fastmri-students/bioops:k8s-demo-llm-routing-20260710"
+IMAGE="cr.yandex/crp5l1da4kinv8ofomr5/fastmri-students/bioops:submit-master-20260715-192759"
 ```
 
-All active Kubernetes and Argo manifests should use the same image.
-
-Check image references:
+Scheduled monitors retain their own pinned, tested image tags. Check image
+references before deployment:
 
 ```bash
 grep -RIn \
@@ -251,7 +254,7 @@ git clone https://github.com/Mayaro8/BioOps.git
 cd BioOps
 
 git fetch --all --prune
-git switch k8s-demo-llm-action-routing
+git switch ifra-final
 git pull --ff-only
 ```
 
@@ -297,7 +300,7 @@ When the credential helper is configured, do not use a separate `docker login cr
 ## 8. Build and push the image
 
 ```bash
-IMAGE="cr.yandex/crp5l1da4kinv8ofomr5/fastmri-students/bioops:k8s-demo-llm-routing-20260710"
+IMAGE="cr.yandex/crp5l1da4kinv8ofomr5/fastmri-students/bioops:submit-master-20260715-192759"
 
 docker build -t "$IMAGE" .
 docker push "$IMAGE"
@@ -404,7 +407,7 @@ unset BIOOPS_PASSWORD BIOOPS_PASSWORD_HASH
 ---
 
 
-## 12. Validate Kubernetes and Argo manifests
+## 11. Validate Kubernetes and Argo manifests
 
 Render the Kubernetes release:
 
@@ -432,7 +435,7 @@ kubectl apply -k deploy/argo \
 
 ---
 
-## 13. Deploy Kubernetes resources
+## 12. Deploy Kubernetes resources
 
 ```bash
 kubectl apply -k deploy/k8s
@@ -472,7 +475,7 @@ kubectl -n bioops-dev logs \
 
 ---
 
-## 14. Deploy Argo WorkflowTemplates
+## 13. Deploy Argo WorkflowTemplates
 
 Argo resources are deployed separately:
 
@@ -496,7 +499,7 @@ bioops-submit-master-local
 
 ---
 
-## 15. Knowledge ingestion workflow
+## 14. Knowledge ingestion workflow
 
 Submit the knowledge-ingestion workflow:
 
@@ -526,7 +529,7 @@ Container exit code is 0
 
 ---
 
-## 16. Submit Master demo
+## 15. Submit Master demo
 
 Apply the Submit Master WorkflowTemplate:
 
@@ -542,7 +545,9 @@ argo submit \
   -n bioops-dev \
   --from workflowtemplate/bioops-submit-master-local \
   -p batch_id=batch-demo-001 \
-  -p samples=sample1,sample2 \
+  -p sample_id=sample1 \
+  -p attempt=0 \
+  -p samples=sample1 \
   -p stage=2 \
   -p mode=demo \
   --watch
@@ -570,9 +575,16 @@ allows Argo to create fresh Pods
 
 The original failed Workflow and Pods remain available for audit and diagnosis.
 
+SubmitMaster status and retry selection is label-driven. Every sample Workflow
+and Pod must carry `bioops.dev/batch-id`, `bioops.dev/sample-id`, and
+`bioops.dev/attempt`. Batch D3 reports count only the latest attempt for each
+sample and include counts, percentages, current-step distribution, and runtime
+statistics. D5 first performs a read-only retry assessment and creates a new
+sample Workflow only after `CONFIRM RETRY <workflow-name>` is sent exactly.
+
 ---
 
-## 17. Cluster Health CronJob
+## 16. Cluster Health CronJob
 
 The Cluster Health scheduler is defined at:
 
@@ -612,8 +624,9 @@ kubectl -n bioops-dev logs \
 Current limitations:
 
 ```text
-The periodic report is written to Job logs.
-Browser notifications are not yet implemented.
+The CronJob is suspended by default until it is manually validated.
+Reports are written to Job logs and sent to the browser notification inbox.
+No repeated browser notification is sent while the pipeline is idle.
 An in-cluster CronJob cannot detect that its own cluster is powered off.
 ```
 
@@ -621,7 +634,7 @@ Complete cluster-outage detection requires an external monitor.
 
 ---
 
-## 18. Batch Status CronJob
+## 17. Batch Status CronJob
 
 The Batch Status scheduler is defined at:
 
@@ -663,7 +676,7 @@ Google Sheets synchronization exists in code but is disabled in the current depl
 
 ---
 
-## 19. Browser interface
+## 18. Browser interface
 
 Find the public Service:
 
@@ -696,7 +709,7 @@ https://bioops.84-201-181-221.sslip.io/
 
 ---
 
-## 20. Agent acceptance prompts
+## 19. Agent acceptance prompts
 
 ### General Agent
 
@@ -719,13 +732,13 @@ Review the Mayaro8/BioOps repository and identify the three most important engin
 ### Cluster Health Agent
 
 ```text
-Check cluster health.
+Check cluster health and show the active pipeline steps.
 ```
 
 ### Submit Master Agent
 
 ```text
-Show the current Submit Master workflow progress.
+Show the Submit Master status for batch batch-demo-001.
 ```
 
 ### Batch Status Agent
@@ -742,7 +755,7 @@ How many objects are in the bucket inventory?
 
 ---
 
-## 21. Minimum demonstration sequence
+## 20. Minimum demonstration sequence
 
 1. Show the active Git branch.
 2. Show the current image tag.
@@ -756,4 +769,3 @@ How many objects are in the bucket inventory?
 10. Record the demonstration.
 
 ---
-

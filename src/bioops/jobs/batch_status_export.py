@@ -7,6 +7,7 @@ from pathlib import Path
 
 from bioops.tools.batch_status_rows import SHEET_COLUMNS
 from bioops.tools.batch_status_store import BatchStatusStore
+from bioops.tools.time_format import format_moscow_fields
 
 
 def export_csv(rows: list[dict[str, str]], path: str) -> None:
@@ -18,7 +19,13 @@ def export_csv(rows: list[dict[str, str]], path: str) -> None:
         writer.writeheader()
 
         for row in rows:
-            writer.writerow({column: row.get(column, "") for column in SHEET_COLUMNS})
+            display_row = format_moscow_fields(row)
+            writer.writerow(
+                {
+                    column: display_row.get(column, "")
+                    for column in SHEET_COLUMNS
+                }
+            )
 
 
 def export_json(rows: list[dict[str, str]], path: str) -> None:
@@ -28,7 +35,7 @@ def export_json(rows: list[dict[str, str]], path: str) -> None:
     payload = {
         "rows_seen": len(rows),
         "columns": SHEET_COLUMNS,
-        "rows": rows,
+        "rows": [format_moscow_fields(row) for row in rows],
     }
 
     output_path.write_text(

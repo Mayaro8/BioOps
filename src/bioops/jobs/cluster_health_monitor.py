@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from statistics import fmean, quantiles
+
 from bioops.agents.cluster_health_agent import (
     ClusterHealthAgent,
 )
@@ -24,25 +26,82 @@ def format_pipeline_report(
     pods: list[PodStatus],
     errors: list[str],
 ) -> str:
-    lines = [
-        f"Active pipeline pods: {len(pods)}",
-        "",
-    ]
+    total_pods = len(pods)
+    pods_by_step: dict[str, int] = {}
 
     for pod in pods:
-        runtime = (
-            f"{pod.runtime_minutes:.1f} min"
-            if pod.runtime_minutes is not None
-            else "unknown"
-        )
+        step = pod.pipeline_step or "unknown"
+        pods_by_step[step] = pods_by_step.get(step, 0) + 1
 
-        node = pod.node_name or "unscheduled"
+    lines = [
+        f"Active pipeline pods: {total_pods}",
+        "",
+        "Pipeline steps:",
+    ]
+
+    for step, count in sorted(pods_by_step.items()):
+        percentage = count / total_pods * 100
+        pod_word = "pod" if count == 1 else "pods"
 
         lines.append(
-            f"- Step: {pod.pipeline_step}\n"
-            f"  Pod: {pod.name}\n"
-            f"  Runtime: {runtime}\n"
-            f"  Node: {node}"
+            f"- {step}: {count} {pod_word} "
+            f"({percentage:.1f}%)"
+        )
+
+    runtime_pods = [
+        pod
+        for pod in pods
+        if pod.runtime_minutes is not None
+    ]
+
+    if runtime_pods:
+        runtimes = sorted(
+            float(pod.runtime_minutes)
+            for pod in runtime_pods
+            if pod.runtime_minutes is not None
+        )
+
+        if len(runtimes) == 1:
+            q1 = q2 = q3 = runtimes[0]
+        else:
+            q1, q2, q3 = quantiles(
+                runtimes,
+                n=4,
+                method="inclusive",
+            )
+
+        shortest = min(
+            runtime_pods,
+            key=lambda pod: float(
+                pod.runtime_minutes or 0.0
+            ),
+        )
+        longest = max(
+            runtime_pods,
+            key=lambda pod: float(
+                pod.runtime_minutes or 0.0
+            ),
+        )
+
+        lines.extend(
+            [
+                "",
+                "Runtime statistics:",
+                f"- Average: {fmean(runtimes):.1f} min",
+                f"- Q1: {q1:.1f} min",
+                f"- Median: {q2:.1f} min",
+                f"- Q3: {q3:.1f} min",
+                (
+                    f"- Shortest: {shortest.name} "
+                    f"({shortest.pipeline_step}, "
+                    f"{shortest.runtime_minutes:.1f} min)"
+                ),
+                (
+                    f"- Longest: {longest.name} "
+                    f"({longest.pipeline_step}, "
+                    f"{longest.runtime_minutes:.1f} min)"
+                ),
+            ]
         )
 
     if errors:
@@ -50,10 +109,7 @@ def format_pipeline_report(
             [
                 "",
                 "Last pod errors:",
-                *(
-                    f"- {error}"
-                    for error in errors[:3]
-                ),
+                *(f"- {error}" for error in errors[:3]),
             ]
         )
 

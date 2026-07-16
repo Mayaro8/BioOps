@@ -9,6 +9,7 @@ metadata:
     epic: c
 spec:
   schedule: "*/15 * * * *"
+  timeZone: "Europe/Moscow"
   suspend: true
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 300
@@ -42,7 +43,7 @@ spec:
 
           containers:
             - name: monitor
-              image: cr.yandex/crp5l1da4kinv8ofomr5/fastmri-students/bioops:infra-final-cluster-health-20260714-115127
+              image: cr.yandex/crp5l1da4kinv8ofomr5/fastmri-students/bioops:bioops-20260716-130405-msk
               imagePullPolicy: Always
 
               command:
@@ -65,7 +66,7 @@ spec:
                   value: browser
 
                 - name: BIOOPS_ALERT_URL
-                  value: http://bioops-api:8000/internal/alerts
+                  value: http://bioops-api-internal:8000/internal/alerts
 
               volumeMounts:
                 - name: agents-config

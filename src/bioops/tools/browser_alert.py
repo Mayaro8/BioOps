@@ -16,7 +16,7 @@ class BrowserAlertClient:
         self.url = (
             url
             or os.getenv("BIOOPS_ALERT_URL")
-            or "http://bioops-api:8000/internal/alerts"
+            or "http://bioops-api-internal:8000/internal/alerts"
         )
         self.token = (
             token

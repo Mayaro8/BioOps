@@ -342,10 +342,16 @@ CHAT_PAGE = """
           timestamp.className =
             "notification-time";
 
-          timestamp.textContent =
+          const moscowTime =
             new Date(
               item.created_at
-            ).toLocaleString();
+            ).toLocaleString(
+              "en-GB",
+              { timeZone: "Europe/Moscow" }
+            );
+
+          timestamp.textContent =
+            `${moscowTime} MSK`;
 
           const message =
             document.createElement("div");

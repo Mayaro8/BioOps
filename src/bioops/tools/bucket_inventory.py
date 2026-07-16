@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Iterable
 from urllib.parse import unquote_plus
 
+from bioops.tools.time_format import MOSCOW_TIMEZONE
+
 
 _DATE_PATTERN = re.compile(r"(?<!\d)(20\d{2})[-_]?([01]\d)[-_]?([0-3]\d)(?!\d)")
 
@@ -80,7 +82,10 @@ class BucketInventoryTool:
         if filename_date:
             return filename_date.isoformat()
 
-        return datetime.fromtimestamp(path.stat().st_mtime).date().isoformat()
+        return datetime.fromtimestamp(
+            path.stat().st_mtime,
+            tz=MOSCOW_TIMEZONE,
+        ).date().isoformat()
 
     def overview(self) -> dict[str, object]:
         return self.filtered_stats()

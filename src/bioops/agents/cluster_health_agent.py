@@ -1,4 +1,5 @@
 from pathlib import Path
+from statistics import fmean, quantiles
 from typing import Any
 
 import yaml
@@ -86,17 +87,86 @@ class ClusterHealthAgent(BaseAgent):
             for prefix in self.INFRASTRUCTURE.values()
         )
 
-    def _format_pipeline_pod(self, pod: PodStatus) -> str:
-        runtime = (
-            f", runtime: {pod.runtime_minutes:.1f} min"
+    def _format_pipeline_section(
+        self,
+        pipeline_pods: list[PodStatus],
+    ) -> list[str]:
+        total_pods = len(pipeline_pods)
+        pods_by_step: dict[str, int] = {}
+
+        for pod in pipeline_pods:
+            step = pod.pipeline_step or "unknown"
+            pods_by_step[step] = pods_by_step.get(step, 0) + 1
+
+        return [
+            (
+                f"- {step}: {count} {'pod' if count == 1 else 'pods'} "
+                f"({count / total_pods * 100:.1f}% of active pipeline pods)"
+            )
+            for step, count in sorted(pods_by_step.items())
+        ]
+
+    def _format_runtime_statistics_section(
+        self,
+        pipeline_pods: list[PodStatus],
+    ) -> list[str]:
+        runtime_pods = [
+            pod
+            for pod in pipeline_pods
             if pod.runtime_minutes is not None
-            else ""
+        ]
+
+        lines = ["", "Active pipeline runtime statistics:"]
+
+        if not runtime_pods:
+            lines.append("- No active pipeline runtime data.")
+            return lines
+
+        runtimes = sorted(
+            float(pod.runtime_minutes)
+            for pod in runtime_pods
+            if pod.runtime_minutes is not None
         )
 
-        return (
-            f"- {pod.pipeline_step}: {pod.name} "
-            f"[{pod.phase}{runtime}]"
+        if len(runtimes) == 1:
+            q1 = q2 = q3 = runtimes[0]
+        else:
+            q1, q2, q3 = quantiles(
+                runtimes,
+                n=4,
+                method="inclusive",
+            )
+
+        shortest = min(
+            runtime_pods,
+            key=lambda pod: float(pod.runtime_minutes or 0.0),
         )
+        longest = max(
+            runtime_pods,
+            key=lambda pod: float(pod.runtime_minutes or 0.0),
+        )
+
+        lines.extend(
+            [
+                f"- Pods measured: {len(runtime_pods)}",
+                f"- Average runtime: {fmean(runtimes):.1f} min",
+                f"- Q1 (25th percentile): {q1:.1f} min",
+                f"- Median (Q2): {q2:.1f} min",
+                f"- Q3 (75th percentile): {q3:.1f} min",
+                (
+                    f"- Shortest-running pod: {shortest.name} "
+                    f"({shortest.pipeline_step}, "
+                    f"{float(shortest.runtime_minutes or 0.0):.1f} min)"
+                ),
+                (
+                    f"- Longest-running pod: {longest.name} "
+                    f"({longest.pipeline_step}, "
+                    f"{float(longest.runtime_minutes or 0.0):.1f} min)"
+                ),
+            ]
+        )
+
+        return lines
 
     def _estimate_report_cost(
         self,
@@ -253,18 +323,21 @@ class ClusterHealthAgent(BaseAgent):
         ]
 
         if pipeline_pods:
-            lines.extend(
-                self._format_pipeline_pod(pod)
-                for pod in pipeline_pods
-            )
+            lines.extend(self._format_pipeline_section(pipeline_pods))
         else:
             lines.append("- No active pipeline workflows.")
 
-        if other_running_pods:
-            lines.extend(["", "Other active pods:"])
+        lines.extend(
+            self._format_runtime_statistics_section(pipeline_pods)
+        )
 
-            for pod in other_running_pods:
-                lines.append(f"- {pod.name} [{pod.phase}]")
+        if other_running_pods:
+            lines.extend(
+                [
+                    "",
+                    f"Other active pods: {len(other_running_pods)}",
+                ]
+            )
 
         lines.extend(
             [

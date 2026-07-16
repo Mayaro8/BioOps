@@ -10,6 +10,7 @@ metadata:
 spec:
   suspend: true
   schedule: "*/10 * * * *"
+  timeZone: "Europe/Moscow"
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 300
   successfulJobsHistoryLimit: 3
@@ -36,7 +37,7 @@ spec:
               effect: NoSchedule
           containers:
             - name: monitor
-              image: cr.yandex/crp5l1da4kinv8ofomr5/fastmri-students/bioops:infra-final-periodic-e1-e4-20260713
+              image: cr.yandex/crp5l1da4kinv8ofomr5/fastmri-students/bioops:bioops-20260716-130405-msk
               imagePullPolicy: Always
               command:
                 - python3

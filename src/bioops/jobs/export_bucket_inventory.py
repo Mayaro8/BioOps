@@ -8,6 +8,8 @@ from typing import Any
 
 import boto3
 
+from bioops.tools.time_format import format_moscow_datetime, now_moscow
+
 
 CSV_FIELDS = ["key", "size", "last_modified", "storage_class", "inventory_date"]
 
@@ -31,7 +33,7 @@ def export_bucket_inventory(
         aws_secret_access_key=secret_access_key,
     )
     paginator = client.get_paginator("list_objects_v2")
-    inventory_date = datetime.now(timezone.utc).date().isoformat()
+    inventory_date = now_moscow().date().isoformat()
 
     object_count = 0
     total_bytes = 0
@@ -68,9 +70,7 @@ def export_bucket_inventory(
 def _format_datetime(value: Any) -> str:
     if value is None:
         return ""
-    if hasattr(value, "isoformat"):
-        return value.isoformat()
-    return str(value)
+    return format_moscow_datetime(value, fallback="")
 
 
 def main() -> None:
