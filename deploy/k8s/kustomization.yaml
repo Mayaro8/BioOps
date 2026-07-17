@@ -8,3 +8,4 @@ resources:
   - batch-status
   - infra-cost
   - cluster-health
+  - rbac/bioops-executor.yaml

@@ -29,13 +29,16 @@ agents:
 
   submit_master:
     enabled: true
-    description: Launches, monitors, reports, and performs explicitly confirmed targeted retries for Submit Master Argo workflows.
+    description: Generates configuration, launches workflows, and performs explicitly confirmed targeted retries.
     argo_namespace: bioops-dev
     argo_service_name: argo-server
     argo_local_port: 2746
     argo_remote_port: 2746
     argo_ui_url: https://158.160.184.15:2746
     argo_workflow_template: bioops-submit-master-local
+    launch_namespace: bioops-dev
+    launch_workflow_template: bioops-fastq-mock
+    config_mount_root: /mnt/pipeline-v3.0
     workflow_name_prefix: bioops-submit-master
     batch_label: bioops.dev/batch-id
     sample_label: bioops.dev/sample-id
@@ -51,6 +54,26 @@ agents:
         - submit-master
         - submit_master
         - submit-master-print
+      validate-fastq:
+        - validate-fastq
+      fastqc:
+        - fastqc
+      trim-adapters:
+        - trim-adapters
+      align-reference:
+        - align-reference
+      sort-bam:
+        - sort-bam
+      mark-duplicates:
+        - mark-duplicates
+      base-recalibration:
+        - base-recalibration
+      call-variants:
+        - call-variants
+      filter-variants:
+        - filter-variants
+      annotate-report:
+        - annotate-report
       haplotypecaller:
         - haplotypecaller
         - haplotype-caller
@@ -70,7 +93,7 @@ agents:
 
   batch_status:
     enabled: true
-    description: Answers persisted batch status questions, including completed and stale records, and provides read-only export/sync instructions.
+    description: Owns persisted and live status plus D3 monitoring and D4 failure reports.
     argo_namespace: bioops-dev
     argo_workflow_template: bioops-submit-master-local
     workflow_name_prefix: bioops-submit-master

@@ -316,8 +316,8 @@ class BucketAgent:
         )
         return "\n".join(lines)
 
-    @staticmethod
-    def _build_action_router() -> LLMActionRouter:
+    def _build_action_router(self) -> LLMActionRouter:
+        suffixes = ", ".join(self.known_name_suffixes) or "none configured"
         return LLMActionRouter(
             agent_name="Bucket Agent",
             actions={
@@ -331,15 +331,28 @@ class BucketAgent:
                 "help": "Explain supported Bucket Agent questions.",
             },
             parameter_schema={
-                "prefix": "Optional exact object-key prefix/path.",
-                "extension": "Optional file extension such as vcf.gz.",
-                "name_suffix": "Optional exact configured filename suffix.",
+                "prefix": (
+                    f"Optional exact object-key prefix inside {self.bucket_name}; "
+                    "remove s3://bucket/ when present."
+                ),
+                "extension": "Optional generic file type, preserving compounds such as vcf.gz or fastq.gz.",
+                "name_suffix": f"Optional exact product suffix. Configured suffixes: {suffixes}.",
                 "storage_class": "Optional storage class such as STANDARD, COLD, or TICE.",
                 "limit": "Optional integer maximum number of files to display.",
             },
             rules=[
+                "Choose count for how many/number of objects.",
+                "Choose total_size for total size, disk usage, or how large a scope is.",
+                "Choose list_files only when object keys/files should be displayed.",
+                "Choose summary when both count and total size are requested.",
+                "Choose structure for folders, directories, or top-level prefixes.",
+                "Choose extension_breakdown for grouping or breakdown by file type.",
+                "Choose storage_class for a breakdown by storage class; when listing files in one named class, choose list_files and set storage_class.",
                 "Use name_suffix for product suffixes such as beagle.imputation.vcf.gz.",
                 "Use extension for generic file types such as vcf.gz.",
+                "Never put a generic compound extension in name_suffix.",
+                "Preserve the complete requested prefix, including batch/sample directories.",
+                "Do not calculate counts or sizes; select filters and let the inventory tool calculate.",
                 "Do not invent a prefix or suffix that is absent from the request.",
                 "All operations are read-only against the local inventory snapshot.",
             ],
@@ -367,6 +380,42 @@ class BucketAgent:
                         "limit": None,
                     },
                     "reason": "The user requests a storage-class breakdown.",
+                },
+                {
+                    "request": "How many .bam files are under batches/batch140325/?",
+                    "action": "count",
+                    "parameters": {
+                        "prefix": "batches/batch140325/",
+                        "extension": "bam",
+                        "name_suffix": None,
+                        "storage_class": None,
+                        "limit": None,
+                    },
+                    "reason": "The user requests a count for a generic extension and prefix.",
+                },
+                {
+                    "request": "What is the total size of vcf.gz objects in s3://genotek-testing/results/batch-1/?",
+                    "action": "total_size",
+                    "parameters": {
+                        "prefix": "results/batch-1/",
+                        "extension": "vcf.gz",
+                        "name_suffix": None,
+                        "storage_class": None,
+                        "limit": None,
+                    },
+                    "reason": "The inventory tool must total a generic compound extension.",
+                },
+                {
+                    "request": "List up to 10 BAM files in COLD storage under data/",
+                    "action": "list_files",
+                    "parameters": {
+                        "prefix": "data/",
+                        "extension": "bam",
+                        "name_suffix": None,
+                        "storage_class": "COLD",
+                        "limit": 10,
+                    },
+                    "reason": "The user wants keys filtered by type, class, prefix, and limit.",
                 },
             ],
         )

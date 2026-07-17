@@ -73,3 +73,23 @@ def test_answers_storage_class_question(tmp_path: Path, monkeypatch) -> None:
 
     assert "Bucket Storage Class Summary" in response
     assert "TICE: 1 objects, 100 B" in response
+
+
+def test_inner_llm_router_prompt_covers_inventory_intents() -> None:
+    agent = BucketAgent.__new__(BucketAgent)
+    agent.bucket_name = "genotek-testing"
+    agent.known_name_suffixes = [
+        "imputation.vcf.gz",
+        "beagle.imputation.vcf.gz",
+    ]
+    router = agent._build_action_router()
+    prompt = router._build_prompt(
+        "How large are vcf.gz files under results/batch-1/?"
+    )
+
+    assert "Choose count for how many" in prompt
+    assert "Choose total_size for total size" in prompt
+    assert "generic compound extension" in prompt
+    assert "imputation.vcf.gz, beagle.imputation.vcf.gz" in prompt
+    assert "Do not calculate counts or sizes" in prompt
+    assert "s3://genotek-testing/results/batch-1/" in prompt

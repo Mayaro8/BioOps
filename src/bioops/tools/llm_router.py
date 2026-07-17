@@ -123,13 +123,14 @@ class LLMRouterTool:
             ),
             "submit_master": (
                 "Submit Master and Argo SubmitMaster operations: D1 config generation, "
-                "D2 UI/launch preparation, D3 progress, D4 failure diagnosis, "
-                "or D5 safe retry with explicit confirmation and sample targeting"
+                "D2 confirmed launch or D5 safe retry with "
+                "explicit confirmation and sample targeting; not status queries"
             ),
             "batch_status": (
-                "persisted batch status records: latest batch status, status of a specific "
-                "batch, failed batches, running batches, completed batches, stale "
-                "batches, and read-only export or synchronization information"
+                "all batch processing queries: live Argo batch/sample/workflow progress, "
+                "pods, logs, errors, D4 failure diagnosis, ETA and runtime, plus persisted latest, failed, "
+                "running batches, completed batches, and stale batches; latest batch status, export, "
+                "and synchronization information"
             ),
             "storage": (
                 "Bucket Agent inventory questions: object count, size, prefixes, files, "
@@ -157,8 +158,9 @@ Rules:
 - Choose only one of the enabled agents listed above.
 - Choose storage for object-storage inventory, bucket paths, object sizes, file lists,
   storage classes, extensions, or inventory snapshot questions.
-- Choose submit_master for SubmitMaster Argo progress, failures, UI, or retry guidance.
-- Choose batch_status for persisted batch records, including completed and stale batches.
+- Choose submit_master for launching or explicitly confirmed retries.
+- Choose batch_status for all batch/sample/workflow queries, including live Argo progress,
+  pods, logs, errors, ETA, runtime, persisted history, completed/stale lists, sync, or export.
 - Choose cluster_health for general Kubernetes health not owned by SubmitMaster.
 - Choose infra_cost for Compute Cloud VM cost, expensive VMs, GPU runtime,
   infrastructure cost alerts, database infrastructure, queues, or Cloud Functions.

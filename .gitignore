@@ -221,6 +221,10 @@ src/bioops/agents/chatgpt.ipynbsrc/bioops/agents/chatgpt.ipynb
 # External/original SubmitMaster and Config Creator sources kept locally only
 submit_master_files/
 
+# Extracted upstream reference packages; one includes local test credentials.
+argo-submit-master-main/
+config_creator/
+
 # Local/placeholder Argo SubmitMaster scaffolding kept locally only
 k8s/argo/local/
 k8s/argo/real/

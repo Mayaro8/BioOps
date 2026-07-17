@@ -6,20 +6,19 @@ from typing import Any
 import yaml
 
 from bioops.agents.base import BaseAgent
-from bioops.jobs.submit_master_d4_failure_bitrix_report import (
-    render_failure_report,
-)
 from bioops.jobs.submit_master_d5_retry_bitrix_report import (
     assess_workflow_retry,
     render_d5_report,
 )
-from bioops.tools.argo_ui_launcher import ArgoUiLauncher
 from bioops.tools.llm_action_router import (
     LLMActionRouter,
     format_action_routing_error,
 )
 from bioops.tools.submit_master_scope import (
     SubmitMasterScopeMonitor,
+)
+from bioops.tools.submit_master_launcher import (
+    SubmitMasterWorkflowLauncher,
 )
 
 
@@ -34,8 +33,7 @@ class SubmitMasterAgent(BaseAgent):
 
     name = "submit_master"
     description = (
-        "Reports explicit batch, sample, and workflow "
-        "status and performs confirmed targeted retries."
+        "Launches processing and performs confirmed targeted retries."
     )
 
     def __init__(
@@ -62,23 +60,12 @@ class SubmitMasterAgent(BaseAgent):
             "bioops-submit-master",
         )
 
-        self.launcher = ArgoUiLauncher(
-            namespace=namespace,
-            service_name=submit.get(
-                "argo_service_name",
-                "argo-server",
+        self.launcher = SubmitMasterWorkflowLauncher(
+            namespace=submit.get("launch_namespace", namespace),
+            template_name=submit.get(
+                "launch_workflow_template",
+                "argo-submit-workflow",
             ),
-            local_port=int(
-                submit.get("argo_local_port", 2746)
-            ),
-            remote_port=int(
-                submit.get("argo_remote_port", 2746)
-            ),
-            url=submit.get(
-                "argo_ui_url",
-                "https://localhost:2746",
-            ),
-            workflow_template_name=template,
         )
 
         self.monitor = SubmitMasterScopeMonitor(
@@ -114,9 +101,6 @@ class SubmitMasterAgent(BaseAgent):
             "d4_workflow_template",
             template,
         )
-        self.d4_log_tail_lines = int(
-            submit.get("d4_log_tail_lines", 80)
-        )
         self.d5_max_retries = int(
             submit.get("d5_max_retries", 2)
         )
@@ -137,90 +121,8 @@ class SubmitMasterAgent(BaseAgent):
 
         parameters = decision.parameters
 
-        if decision.action == "launch_ui":
-            result = self.launcher.launch(
-                start_port_forward=True
-            )
-            return result.message
-
-        if decision.action == "batch_status":
-            batch_id = self._parameter(
-                parameters,
-                "batch_id",
-            )
-
-            if not batch_id:
-                return (
-                    "SubmitMaster batch status requires "
-                    "an explicit batch_id."
-                )
-
-            return self.monitor.render_batch_status(
-                batch_id
-            )
-
-        if decision.action == "sample_status":
-            sample_id = self._parameter(
-                parameters,
-                "sample_id",
-            )
-
-            if not sample_id:
-                return (
-                    "SubmitMaster sample status requires "
-                    "an explicit sample_id."
-                )
-
-            return self.monitor.render_sample_status(
-                sample_id=sample_id,
-                batch_id=self._parameter(
-                    parameters,
-                    "batch_id",
-                ),
-            )
-
-        if decision.action == "workflow_status":
-            workflow_name = self._parameter(
-                parameters,
-                "workflow_name",
-            )
-
-            if not workflow_name:
-                return (
-                    "SubmitMaster workflow status requires "
-                    "an explicit workflow_name."
-                )
-
-            return self.monitor.render_workflow_status(
-                workflow_name
-            )
-
-        if decision.action == "latest_progress":
-            return self.monitor.render_latest_progress()
-
-        if decision.action == "failure_report":
-            workflow_name = self._selected_workflow(
-                parameters
-            )
-
-            if workflow_name.startswith("ERROR: "):
-                return workflow_name.removeprefix(
-                    "ERROR: "
-                )
-
-            return render_failure_report(
-                namespace=self.d4_namespace,
-                workflow_prefix=(
-                    self.d4_workflow_prefix
-                ),
-                workflow_template=(
-                    self.d4_workflow_template
-                ),
-                log_tail_lines=(
-                    self.d4_log_tail_lines
-                ),
-                workflow_name=workflow_name,
-            )
+        if decision.action == "launch_submit_master":
+            return self._launch_mock_pipeline(message, parameters)
 
         if decision.action == "retry_sample":
             return self._retry_sample(
@@ -229,6 +131,47 @@ class SubmitMasterAgent(BaseAgent):
             )
 
         return self._help()
+
+    def _launch_mock_pipeline(
+        self,
+        message: str,
+        parameters: dict[str, Any],
+    ) -> str:
+        batch_id = self._parameter(parameters, "batch_id")
+        input_prefix = self._parameter(parameters, "input_prefix")
+        raw_stage = parameters.get("stage")
+        stage = str(raw_stage).strip() if raw_stage is not None else "all"
+        if not batch_id or not input_prefix:
+            return (
+                "Mock launch requires batch_id and input_prefix.\n"
+                "No workflow was created."
+            )
+        confirmation = f"CONFIRM MOCK LAUNCH {batch_id} {input_prefix} {stage}"
+        if message.strip() != confirmation:
+            return "\n".join([
+                "SubmitMaster Mock Launch Assessment",
+                "",
+                f"Batch: {batch_id}",
+                f"Input prefix: {input_prefix}",
+                f"Stage: {stage}",
+                "Plan: discover batch files -> Config Creator -> Submit Master -> sample workflows",
+                "No workflow was created.",
+                "Send exactly to launch:",
+                confirmation,
+            ])
+
+        try:
+            return self.launcher.launch_mock(
+                batch_id=batch_id,
+                input_prefix=input_prefix,
+                stage=stage,
+            )
+        except Exception as error:
+            return (
+                "SubmitMaster launch failed.\n\n"
+                f"Reason: {type(error).__name__}: {error}\n"
+                "The API did not confirm workflow creation."
+            )
 
     def _retry_sample(
         self,
@@ -356,25 +299,8 @@ class SubmitMasterAgent(BaseAgent):
         return LLMActionRouter(
             agent_name="SubmitMaster Agent",
             actions={
-                "launch_ui": (
-                    "Open the SubmitMaster Argo UI."
-                ),
-                "batch_status": (
-                    "Aggregate one explicit batch."
-                ),
-                "sample_status": (
-                    "Report one sample and its pods."
-                ),
-                "workflow_status": (
-                    "Report one explicit workflow."
-                ),
-                "latest_progress": (
-                    "Read latest only when explicitly "
-                    "requested."
-                ),
-                "failure_report": (
-                    "Diagnose one selected workflow "
-                    "or sample."
+                "launch_submit_master": (
+                    "Assess or confirm a SubmitMaster launch using Config Creator JSON."
                 ),
                 "retry_sample": (
                     "Assess or confirm one targeted "
@@ -395,64 +321,22 @@ class SubmitMasterAgent(BaseAgent):
                     "Exact workflow name from the "
                     "request or null."
                 ),
+                "input_prefix": "Exact mock batch directory under /mock-data/ or null.",
+                "stage": "all, 1, 2, or 3; use all when omitted.",
             },
             rules=[
+                (
+                    "Choose launch_submit_master for launch, start, or submit requests; "
+                    "batch_id and input_prefix are required and must never be invented."
+                ),
                 (
                     "Choose retry_sample for retry, "
                     "restart, or resubmit requests."
                 ),
-                (
-                    "Choose batch_status when batch_id "
-                    "is supplied for status or D3."
-                ),
-                (
-                    "Choose sample_status when "
-                    "sample_id is supplied for status."
-                ),
-                (
-                    "Choose workflow_status when "
-                    "workflow_name is supplied."
-                ),
-                (
-                    "Choose failure_report for D4 only "
-                    "when a sample or workflow is "
-                    "selected."
-                ),
-                (
-                    "Choose latest_progress only when "
-                    "the user explicitly says latest."
-                ),
+                "Status and progress queries belong to Batch Status, not this agent.",
                 "Never invent identifiers.",
             ],
             examples=[
-                {
-                    "request": (
-                        "Show batch B104 progress"
-                    ),
-                    "action": "batch_status",
-                    "parameters": {
-                        "batch_id": "B104",
-                        "sample_id": None,
-                        "workflow_name": None,
-                    },
-                    "reason": (
-                        "An explicit batch was selected."
-                    ),
-                },
-                {
-                    "request": (
-                        "Show sample S927 in batch B104"
-                    ),
-                    "action": "sample_status",
-                    "parameters": {
-                        "batch_id": "B104",
-                        "sample_id": "S927",
-                        "workflow_name": None,
-                    },
-                    "reason": (
-                        "An explicit sample was selected."
-                    ),
-                },
                 {
                     "request": (
                         "Retry sample S927 in batch B104"
@@ -486,13 +370,10 @@ class SubmitMasterAgent(BaseAgent):
     def _help() -> str:
         return (
             "SubmitMaster Agent\n\n"
-            "- Check an explicit batch, sample, "
-            "or workflow\n"
-            "- Aggregate counts, percentages, "
-            "and runtime statistics\n"
-            "- Diagnose selected failures\n"
+            "- Discover a batch and launch per-sample FASTQ workflows after confirmation\n"
             "- Assess and explicitly confirm "
-            "a targeted retry"
+            "a targeted retry\n"
+            "- Use Batch Status for all status and progress queries"
         )
 
     @staticmethod

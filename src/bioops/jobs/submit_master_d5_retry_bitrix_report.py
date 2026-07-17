@@ -234,7 +234,14 @@ def assess_workflow_retry(*, namespace, workflow_name):
         namespace,
         workflow_name,
     )
-    return _retry_decision(workflow)
+    retryable, reason = _retry_decision(workflow)
+    if retryable:
+        try:
+            _, samples = _target_retry_spec(workflow)
+        except ValueError as error:
+            return False, f"Not safely retryable: {error}."
+        reason = f"{reason} Target samples: {', '.join(samples)}."
+    return retryable, reason
 
 
 def _safe_label_value(value: str) -> str:
@@ -302,6 +309,75 @@ def _has_active_retry(
     return False
 
 
+def _target_retry_spec(workflow: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """Return a spec scoped to failed samples, or fail closed."""
+    metadata = workflow.get("metadata", {}) or {}
+    workflow_sample = (metadata.get("labels", {}) or {}).get("bioops.dev/sample-id")
+    original_spec = copy.deepcopy(workflow.get("spec", {}))
+    if workflow_sample:
+        return original_spec, [workflow_sample]
+
+    templates = original_spec.get("templates", []) or []
+    template_samples = {
+        template.get("name"): (template.get("metadata", {}).get("labels", {}) or {}).get(
+            "bioops.dev/sample-id"
+        )
+        for template in templates
+        if isinstance(template, dict) and template.get("name")
+    }
+    failed_template_names = {
+        node.get("templateName")
+        for node in (workflow.get("status", {}).get("nodes", {}) or {}).values()
+        if node.get("phase") in FAILED_PHASES and node.get("templateName")
+    }
+    failed_samples = sorted({
+        template_samples[name]
+        for name in failed_template_names
+        if template_samples.get(name)
+    })
+    if not failed_samples:
+        raise ValueError(
+            "retry scope is unknown: failed nodes are not mapped to sample-labeled templates"
+        )
+
+    selected_templates = {
+        name for name, sample in template_samples.items() if sample in failed_samples
+    }
+    entrypoint = original_spec.get("entrypoint")
+    root = next(
+        (template for template in templates if template.get("name") == entrypoint),
+        None,
+    )
+    if not root or not isinstance(root.get("dag", {}).get("tasks"), list):
+        raise ValueError("retry scope is unsupported: workflow entrypoint is not a DAG")
+
+    selected_tasks = [
+        copy.deepcopy(task)
+        for task in root["dag"]["tasks"]
+        if task.get("template") in selected_templates
+    ]
+    selected_task_names = {task.get("name") for task in selected_tasks}
+    for task in selected_tasks:
+        if "dependencies" in task:
+            task["dependencies"] = [
+                name for name in task["dependencies"] if name in selected_task_names
+            ]
+            if not task["dependencies"]:
+                task.pop("dependencies")
+
+    if not selected_tasks:
+        raise ValueError("retry scope is empty after filtering failed samples")
+    root["dag"]["tasks"] = selected_tasks
+    original_spec["templates"] = [
+        root,
+        *[
+            template for template in templates
+            if template.get("name") in selected_templates
+        ],
+    ]
+    return original_spec, failed_samples
+
+
 def _resubmit_workflow(
     api: client.CustomObjectsApi,
     workflow: dict[str, Any],
@@ -312,7 +388,7 @@ def _resubmit_workflow(
     metadata = workflow.get("metadata", {})
     old_name = metadata.get("name", "unknown")
 
-    new_spec = copy.deepcopy(workflow.get("spec", {}))
+    new_spec, targeted_samples = _target_retry_spec(workflow)
 
     # If the old workflow was manually stopped, do not copy the stop instruction.
     new_spec.pop("shutdown", None)
@@ -347,6 +423,8 @@ def _resubmit_workflow(
         "bioops.dev/d5-root": _safe_label_value(root_workflow),
         "bioops.dev/attempt": str(next_retry_count),
     })
+    if len(targeted_samples) == 1:
+        labels["bioops.dev/sample-id"] = targeted_samples[0]
 
     body = {
         "apiVersion": "argoproj.io/v1alpha1",
@@ -359,6 +437,7 @@ def _resubmit_workflow(
                 "bioops.dev/d5-root-workflow": root_workflow,
                 "bioops.dev/d5-parent-workflow": old_name,
                 "bioops.dev/d5-retry-count": str(next_retry_count),
+                "bioops.dev/d5-target-samples": ",".join(targeted_samples),
             },
         },
         "spec": new_spec,

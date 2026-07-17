@@ -90,15 +90,14 @@ def test_prompt_lists_only_enabled_agents():
     assert '"agent": "general|knowledge"' in prompt
 
 
-def test_prompt_contains_submit_master_d1_to_d5_guidance():
+def test_prompt_limits_submit_master_to_launch_and_retry():
     tool = LLMRouterTool(allowed_agents={"general", "submit_master"})
     prompt = tool._build_prompt("retry failed submit master workflow")
     assert "D1" in prompt
     assert "D2" in prompt
-    assert "D3" in prompt
-    assert "D4" in prompt
     assert "D5" in prompt
     assert "safe retry" in prompt
+    assert "not status queries" in prompt
 
 
 def test_prompt_contains_batch_status_guidance():
@@ -108,6 +107,7 @@ def test_prompt_contains_batch_status_guidance():
     assert "failed batches" in prompt
     assert "completed batches" in prompt
     assert "stale" in prompt
+    assert "live Argo" in prompt
     assert '"agent": "batch_status|general"' in prompt
 
 

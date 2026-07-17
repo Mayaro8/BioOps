@@ -71,6 +71,9 @@ subjects:
   - kind: ServiceAccount
     name: bioops-executor
     namespace: bioops-dev
+  - kind: ServiceAccount
+    name: bioops-student
+    namespace: bioops-dev
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role

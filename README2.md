@@ -537,10 +537,22 @@ output parameter.
 Submit Master receives that JSON through `SUBMIT_MASTER_CONFIG`, verifies all
 required fields, and runs the demonstration.
 
-The `launch_ui` action starts a `kubectl port-forward` process and attempts to
-open the Argo UI. It does not directly submit a Workflow.
+The chat agent does not open Argo UI. Its `launch_submit_master` action accepts
+an explicit batch ID, a mock batch directory under `/mock-data/`, and an
+optional stage selection.
+It first returns the exact confirmation phrase:
 
-Workflow submission happens through the Argo UI, Argo CLI, or Kubernetes API.
+```text
+CONFIRM MOCK LAUNCH <batch_id> <input_prefix> <stage>
+```
+
+Only that exact follow-up creates an Argo Workflow through the Kubernetes API.
+`bioops-fastq-mock` runs Config Creator, passes its generated JSON to Submit
+Master, and Submit Master creates one labeled task chain per discovered sample.
+The directory may contain mixed files: Config Creator selects paired raw FASTQ
+for `all`/Stage 1, paired `*.trimmed.fastq.gz` for Stage 2, or
+`*.recalibrated.bam` for Stage 3. Unrelated files are ignored and incomplete
+read pairs fail validation.
 
 #### D3 monitoring
 
@@ -550,6 +562,12 @@ D3 supports:
 - explicit sample status;
 - explicit Workflow status;
 - latest Workflow only when the user explicitly requests latest.
+
+All batch, sample, workflow, progress, pod, log, error, ETA, and runtime queries
+route to Batch Status. For one explicit batch it returns the persisted record
+followed by live Argo processing state. Batch Status also owns D4 failed-pod
+diagnosis and reports. Submit Master owns only configuration/launch and
+explicitly confirmed retry operations.
 
 The standalone D3 script requires one of:
 
@@ -603,6 +621,11 @@ Blocked categories include:
 - authentication failures;
 - permission failures;
 - unknown failure reasons.
+
+Retries are sample-scoped. Single-sample Workflows may be resubmitted as one
+unit. For batch DAGs, failed nodes must map to `bioops.dev/sample-id` labels;
+D5 keeps only failed samples' task chains and excludes successful samples.
+Unknown or unsupported retry scope is blocked before confirmation.
 
 Before creating a retry, D5 checks:
 
@@ -846,7 +869,8 @@ though the standalone monitoring CronJobs exist.
 |---|---|---|
 | General, Knowledge, Cluster Health, Review, Batch Status, Storage, E1 report | Browser or CLI | Read-only except for external LLM/API calls. |
 | Submit Master status and D4 | Browser or CLI | Read-only Kubernetes/Argo access. |
-| Submit Master UI | Explicit request | Starts port-forward and tries to open a browser. |
+| Submit Master launch assessment | Batch, input prefix, and stage | Read-only; renders the batch discovery plan. |
+| Submit Master launch confirmation | Exact phrase including batch, input prefix, and stage | Creates the combined Config Creator and Submit Master Workflow. |
 | D5 assessment | Retry request | Read-only assessment. |
 | D5 confirmation | Exact confirmation | Creates one new Argo Workflow if checks pass. |
 | Knowledge ingestion | Manual Job/Workflow | Recreates and repopulates Qdrant. |

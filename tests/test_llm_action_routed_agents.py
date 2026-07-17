@@ -88,17 +88,34 @@ class FakeInventoryTool:
         return (value or "").strip().strip("/")
 
 
-def test_submit_master_batch_action_calls_monitor():
-    agent = SubmitMasterAgent.__new__(SubmitMasterAgent)
-    agent.action_router = FakeActionRouter("batch_status", {"batch_id": "B104"})
-    agent.monitor = SimpleNamespace(render_batch_status=lambda value: f"batch report {value}")
-    agent.launcher = None
-    agent.d4_namespace = "bioops-dev"
-    agent.d4_workflow_prefix = "bioops-submit-master"
-    agent.d4_workflow_template = "bioops-submit-master-local"
-    agent.d4_log_tail_lines = 80
+def test_batch_status_specific_batch_combines_persisted_and_live(tmp_path: Path):
+    rows = [{"batch_id": "B104", "workflow_name": "stored-workflow", "status": "Running"}]
+    agent = BatchStatusAgent(
+        config_path=tmp_path / "missing.yaml",
+        action_router=FakeActionRouter("specific_batch", {"batch_id": "B104"}),
+        store=FakeStore(rows),
+        monitor=SimpleNamespace(render_batch_status=lambda value: f"live report {value}"),
+    )
+    response = agent.run("flexible wording")
+    assert "stored-workflow" in response
+    assert "live report B104" in response
 
-    assert agent.run("flexible wording") == "batch report B104"
+
+def test_batch_status_owns_d4_failure_report(tmp_path: Path, monkeypatch):
+    agent = BatchStatusAgent(
+        config_path=tmp_path / "missing.yaml",
+        action_router=FakeActionRouter(
+            "failure_report", {"workflow_name": "failed-workflow"}
+        ),
+        store=FakeStore([]),
+        monitor=SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        "bioops.agents.batch_status_agent.render_failure_report",
+        lambda **values: f"D4 report {values['workflow_name']}",
+    )
+    response = agent.run("diagnose failed-workflow")
+    assert response == "D4 report failed-workflow"
 
 
 def test_submit_master_action_router_failure_is_fail_closed():

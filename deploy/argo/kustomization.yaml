@@ -4,3 +4,4 @@ kind: Kustomization
 resources:
   - knowledge-ingest-template.yaml
   - submit-master-template.yaml
+  - mock-fastq-pipeline-template.yaml

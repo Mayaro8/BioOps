@@ -1,0 +1,103 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: bioops-fastq-mock
+  namespace: bioops-dev
+  labels:
+    app.kubernetes.io/name: bioops
+    app.kubernetes.io/component: submit-master-mock
+spec:
+  serviceAccountName: bioops-executor
+  entrypoint: create-and-submit
+  arguments:
+    parameters:
+      - name: batch_id
+      - name: input_prefix
+      - name: stage
+        value: all
+      - name: image
+        value: cr.yandex/crp5l1da4kinv8ofomr5/fastmri-students/bioops:cluster-health-eta-20260717-104554-msk
+  workflowMetadata:
+    labels:
+      bioops.dev/workload: submit-master
+      bioops.dev/batch-id: "{{workflow.parameters.batch_id}}"
+  volumes:
+    - name: mock-data
+      emptyDir: {}
+  templates:
+    - name: create-and-submit
+      dag:
+        tasks:
+          - name: seed-mock-batch
+            template: seed-mock-batch
+          - name: config-creator
+            dependencies: [seed-mock-batch]
+            template: config-creator
+          - name: submit-master
+            dependencies: [config-creator]
+            template: submit-master
+            arguments:
+              parameters:
+                - name: generated-config
+                  value: "{{tasks.config-creator.outputs.parameters.generated-config}}"
+
+    - name: seed-mock-batch
+      metadata:
+        labels:
+          pipeline_step: seed-mock-batch
+      container:
+        image: "{{workflow.parameters.image}}"
+        command: [python, -m, bioops.jobs.mock_batch_seed]
+        args:
+          - --input-prefix
+          - "{{workflow.parameters.input_prefix}}"
+        volumeMounts:
+          - name: mock-data
+            mountPath: /mock-data
+
+    - name: config-creator
+      metadata:
+        labels:
+          pipeline_step: config-creator
+      container:
+        image: "{{workflow.parameters.image}}"
+        command: [python, -m, bioops.jobs.mock_fastq_config_creator]
+        args:
+          - --batch-id
+          - "{{workflow.parameters.batch_id}}"
+          - --input-prefix
+          - "{{workflow.parameters.input_prefix}}"
+          - --stage
+          - "{{workflow.parameters.stage}}"
+          - --output
+          - /tmp/mock-submit-master-config.json
+        volumeMounts:
+          - name: mock-data
+            mountPath: /mock-data
+      outputs:
+        parameters:
+          - name: generated-config
+            valueFrom:
+              path: /tmp/mock-submit-master-config.json
+
+    - name: submit-master
+      metadata:
+        labels:
+          pipeline_step: submit-master
+      inputs:
+        parameters:
+          - name: generated-config
+      container:
+        image: "{{workflow.parameters.image}}"
+        # Materialize the Argo string parameter as the file Submit Master expects.
+        command: [sh, -c]
+        args:
+          - >-
+            printf '%s' "$GENERATED_CONFIG" > /tmp/mock-submit-master-config.json &&
+            python -m bioops.jobs.mock_submit_master
+            --config /tmp/mock-submit-master-config.json --namespace bioops-dev
+        env:
+          - name: GENERATED_CONFIG
+            value: "{{inputs.parameters.generated-config}}"
+          - name: MOCK_PIPELINE_IMAGE
+            value: "{{workflow.parameters.image}}"
