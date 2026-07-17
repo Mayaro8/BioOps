@@ -219,14 +219,26 @@ class ClusterHealthAgent(BaseAgent):
 
         reports = self.eta_tool.estimate_for_running_pods(eta_pods)
 
+        remaining_by_step: dict[str, list[float]] = {}
+
         for report in reports:
             if report.remaining_minutes is None:
                 continue
 
+            remaining_by_step.setdefault(
+                report.pipeline_step,
+                [],
+            ).append(float(report.remaining_minutes))
+
+        for step in sorted(remaining_by_step):
+            remaining_times = remaining_by_step[step]
+            pod_count = len(remaining_times)
+            pod_word = "pod" if pod_count == 1 else "pods"
+
             lines.append(
-                f"- {report.pipeline_step}: "
-                f"~{report.remaining_minutes:.1f} min remaining "
-                f"for {report.pod_name}"
+                f"- {step}: average "
+                f"~{fmean(remaining_times):.1f} min remaining "
+                f"across {pod_count} {pod_word}"
             )
 
         if len(lines) == 2:
