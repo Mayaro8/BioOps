@@ -103,10 +103,11 @@ Example:
 Check cluster health.
 ```
 
-The Cluster Health Agent separates BioOps infrastructure Pods from labeled
-pipeline Pods. Its scheduled monitor sends browser warnings for recent Pod
-errors and browser status reports while pipeline Pods are active. It is
-read-only and does not restart Pods.
+The Cluster Health Agent uses a second LLM routing layer to choose a bounded
+read-only report. It separates BioOps infrastructure Pods from labeled pipeline
+Pods and reports pod phases and active steps as counts and percentages. A
+30-minute monitor sends analyzed Pod errors to the browser, and an hourly
+monitor sends the full health report. It never restarts Pods.
 
 ### Review Agent
 
@@ -586,30 +587,32 @@ sample Workflow only after `CONFIRM RETRY <workflow-name>` is sent exactly.
 
 ## 16. Cluster Health CronJob
 
-The Cluster Health scheduler is defined at:
+The Cluster Health schedulers are defined at:
 
 ```text
 deploy/k8s/cluster-health/cronjob.yaml
+deploy/k8s/cluster-health/error-cronjob.yaml
 ```
 
-It runs:
+They run:
 
 ```text
-python -m bioops.jobs.cluster_health_monitor
+python -m bioops.jobs.cluster_health_monitor --mode status
+python -m bioops.jobs.cluster_health_monitor --mode errors
 ```
 
 Check the CronJob:
 
 ```bash
 kubectl -n bioops-dev get \
-  cronjob cluster-health-monitor
+  cronjob bioops-cluster-health-monitor bioops-cluster-error-monitor
 ```
 
 Run it manually:
 
 ```bash
 kubectl -n bioops-dev create job \
-  --from=cronjob/cluster-health-monitor \
+  --from=cronjob/bioops-cluster-health-monitor \
   cluster-health-monitor-manual-$(date +%s)
 ```
 
@@ -617,16 +620,17 @@ Inspect logs:
 
 ```bash
 kubectl -n bioops-dev logs \
-  -l app.kubernetes.io/name=cluster-health-monitor \
+  -l component=cluster-health-monitor \
   --tail=200
 ```
 
 Current limitations:
 
 ```text
-The CronJob is suspended by default until it is manually validated.
 Reports are written to Job logs and sent to the browser notification inbox.
-No repeated browser notification is sent while the pipeline is idle.
+The full health report runs hourly, including while the pipeline is idle.
+Analyzed recent-error alerts run every 30 minutes and stay quiet when healthy.
+Both CronJobs are suspended until the new image is built, pushed, and validated.
 An in-cluster CronJob cannot detect that its own cluster is powered off.
 ```
 

@@ -126,3 +126,90 @@ def test_no_recent_errors_returns_empty_list(monkeypatch) -> None:
     tool = K8sHealthTool(namespace="bioops-dev")
 
     assert tool.get_recent_errors() == []
+
+
+def test_normal_container_creating_state_is_not_an_error(monkeypatch) -> None:
+    waiting = SimpleNamespace(
+        reason="ContainerCreating",
+        message="Container image is being prepared",
+    )
+    status = SimpleNamespace(
+        name="pipeline",
+        state=SimpleNamespace(waiting=waiting, terminated=None),
+    )
+    pending_pod = SimpleNamespace(
+        metadata=SimpleNamespace(name="pipeline-test"),
+        status=SimpleNamespace(
+            phase="Pending",
+            start_time=None,
+            init_container_statuses=[],
+            container_statuses=[status],
+        ),
+    )
+
+    class FakeCoreApi:
+        def list_namespaced_pod(self, **_kwargs):
+            return SimpleNamespace(items=[pending_pod])
+
+        def read_namespaced_pod_log(self, **_kwargs):
+            return "still starting"
+
+    monkeypatch.setattr(
+        k8s_health.config,
+        "load_incluster_config",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        k8s_health.client,
+        "CoreV1Api",
+        FakeCoreApi,
+    )
+
+    tool = K8sHealthTool(namespace="bioops-dev")
+
+    assert tool.get_recent_errors() == []
+
+
+def test_image_pull_backoff_is_reported(monkeypatch) -> None:
+    waiting = SimpleNamespace(
+        reason="ImagePullBackOff",
+        message="registry denied access",
+    )
+    status = SimpleNamespace(
+        name="pipeline",
+        state=SimpleNamespace(waiting=waiting, terminated=None),
+    )
+    pending_pod = SimpleNamespace(
+        metadata=SimpleNamespace(name="pipeline-test"),
+        status=SimpleNamespace(
+            phase="Pending",
+            start_time=None,
+            init_container_statuses=[],
+            container_statuses=[status],
+        ),
+    )
+
+    class FakeCoreApi:
+        def list_namespaced_pod(self, **_kwargs):
+            return SimpleNamespace(items=[pending_pod])
+
+        def read_namespaced_pod_log(self, **_kwargs):
+            return ""
+
+    monkeypatch.setattr(
+        k8s_health.config,
+        "load_incluster_config",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        k8s_health.client,
+        "CoreV1Api",
+        FakeCoreApi,
+    )
+
+    tool = K8sHealthTool(namespace="bioops-dev")
+
+    errors = tool.get_recent_errors()
+
+    assert len(errors) == 1
+    assert "ImagePullBackOff" in errors[0]

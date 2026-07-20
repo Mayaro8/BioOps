@@ -1,14 +1,14 @@
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: bioops-cluster-health-monitor
+  name: bioops-cluster-error-monitor
   namespace: bioops-dev
   labels:
     app: bioops
-    component: cluster-health-monitor
+    component: cluster-error-monitor
     epic: c
 spec:
-  schedule: "0 * * * *"
+  schedule: "*/30 * * * *"
   timeZone: "Europe/Moscow"
   suspend: true
   concurrencyPolicy: Forbid
@@ -25,7 +25,7 @@ spec:
         metadata:
           labels:
             app: bioops
-            component: cluster-health-monitor
+            component: cluster-error-monitor
             epic: c
 
         spec:
@@ -51,7 +51,7 @@ spec:
                 - -m
                 - bioops.jobs.cluster_health_monitor
                 - --mode
-                - status
+                - errors
 
               envFrom:
                 - configMapRef:

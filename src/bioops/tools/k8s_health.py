@@ -23,6 +23,16 @@ class PodStatus:
 class K8sHealthTool:
     """Read current Kubernetes pod health and recent pod errors."""
 
+    PROBLEM_WAITING_REASONS = {
+        "CrashLoopBackOff",
+        "CreateContainerConfigError",
+        "CreateContainerError",
+        "ErrImagePull",
+        "ImagePullBackOff",
+        "InvalidImageName",
+        "RunContainerError",
+    }
+
     ERROR_KEYWORDS = (
         "forbidden",
         "oomkilled",
@@ -202,7 +212,10 @@ class K8sHealthTool:
             state = getattr(container_status, "state", None)
             waiting = getattr(state, "waiting", None)
 
-            if waiting is not None:
+            if (
+                waiting is not None
+                and waiting.reason in self.PROBLEM_WAITING_REASONS
+            ):
                 detail = waiting.reason or "unknown reason"
 
                 if waiting.message:

@@ -8,6 +8,11 @@ from bioops.agents.base import BaseAgent
 from bioops.tools.cost_tool import CostTool
 from bioops.tools.eta_tool import ETATool
 from bioops.tools.k8s_health import K8sHealthTool, PodStatus
+from bioops.tools.llm_action_router import (
+    LLMActionRouter,
+    format_action_routing_error,
+)
+from bioops.tools.pod_error_analysis import analyze_pod_errors
 
 
 class ClusterHealthAgent(BaseAgent):
@@ -25,7 +30,8 @@ class ClusterHealthAgent(BaseAgent):
         self,
         health_tool: K8sHealthTool | None = None,
         config_path: str = "configs/agents.yaml",
-    ):
+        action_router: LLMActionRouter | None = None,
+    ) -> None:
         self.config = self._load_config(config_path)
         cluster_config = self.config.get("agents", {}).get(
             "cluster_health",
@@ -49,11 +55,46 @@ class ClusterHealthAgent(BaseAgent):
         self.eta_tool = ETATool(
             cluster_config.get("step_eta_minutes", {})
         )
+        self.error_report_limit = max(
+            1,
+            int(cluster_config.get("error_report_limit", 20)),
+        )
+        self.action_router = action_router or self._build_action_router()
 
     def run(self, message: str) -> str:
         try:
+            decision = self.action_router.route(message)
+        except Exception as error:
+            return format_action_routing_error(
+                "Cluster Health Agent",
+                error,
+            )
+
+        if decision.action == "help":
+            return self._help()
+
+        try:
+            if decision.action == "recent_errors":
+                errors = self.health_tool.get_recent_errors(
+                    limit=self.error_report_limit,
+                )
+                return self.format_analyzed_errors(errors)
+
             pods = self.health_tool.get_pods()
-            errors = self.health_tool.get_recent_errors()
+
+            if decision.action == "pod_statuses":
+                return self._format_pod_status_report(pods)
+
+            if decision.action == "running_steps":
+                return self._format_running_steps_report(pods)
+
+            if decision.action == "cost_eta":
+                return self._format_cost_eta_report(pods)
+
+            errors = self.health_tool.get_recent_errors(
+                limit=self.error_report_limit,
+            )
+            return self.format_overall_health(pods, errors)
         except Exception as error:
             cost_report = self.cost_tool.estimate_cluster_cost(
                 runtime_minutes=0.0
@@ -70,7 +111,74 @@ class ClusterHealthAgent(BaseAgent):
                 f"- Mode: {cost_report.mode}"
             )
 
-        return self._format_report(pods, errors)
+    @staticmethod
+    def _build_action_router() -> LLMActionRouter:
+        return LLMActionRouter(
+            agent_name="Cluster Health Agent",
+            actions={
+                "overall_health": (
+                    "Return the full current cluster health report, including "
+                    "pod phases, running steps, errors, cost, and ETA."
+                ),
+                "pod_statuses": (
+                    "Return Kubernetes pod-phase counts and percentages."
+                ),
+                "running_steps": (
+                    "Return the pipeline steps currently running, with pod "
+                    "counts and percentages."
+                ),
+                "recent_errors": (
+                    "Return analyzed recent pod and container errors."
+                ),
+                "cost_eta": (
+                    "Return the configured current pod cost estimate and ETA."
+                ),
+                "help": "Explain the read-only Cluster Health capabilities.",
+            },
+            rules=[
+                "This agent is read-only and must never restart or delete pods.",
+                (
+                    "Choose overall_health for broad health or cluster-state "
+                    "requests."
+                ),
+                (
+                    "Choose pod_statuses for requests specifically about pod "
+                    "phases."
+                ),
+                (
+                    "Choose running_steps for requests specifically about "
+                    "current pipeline steps."
+                ),
+                (
+                    "Choose recent_errors for failed pods, logs, errors, or "
+                    "diagnosis."
+                ),
+                (
+                    "Choose cost_eta when cost or completion ETA is the main "
+                    "request."
+                ),
+            ],
+            examples=[
+                {
+                    "request": "How healthy is the cluster overall?",
+                    "action": "overall_health",
+                    "parameters": {},
+                    "reason": "The user requested a broad cluster report.",
+                },
+                {
+                    "request": "What pipeline steps are running now?",
+                    "action": "running_steps",
+                    "parameters": {},
+                    "reason": "The request is specifically about active steps.",
+                },
+                {
+                    "request": "Why did a pod fail?",
+                    "action": "recent_errors",
+                    "parameters": {},
+                    "reason": "The request asks for failed-pod diagnosis.",
+                },
+            ],
+        )
 
     def _load_config(self, config_path: str) -> dict[str, Any]:
         path = Path(config_path)
@@ -105,6 +213,94 @@ class ClusterHealthAgent(BaseAgent):
             )
             for step, count in sorted(pods_by_step.items())
         ]
+
+    @staticmethod
+    def _format_pod_phase_section(
+        pods: list[PodStatus],
+    ) -> list[str]:
+        if not pods:
+            return ["- No pods found."]
+
+        pods_by_phase: dict[str, int] = {}
+        for pod in pods:
+            phase = pod.phase or "Unknown"
+            pods_by_phase[phase] = pods_by_phase.get(phase, 0) + 1
+
+        total_pods = len(pods)
+        return [
+            (
+                f"- {phase}: {count} {'pod' if count == 1 else 'pods'} "
+                f"({count / total_pods * 100:.1f}% of all pods)"
+            )
+            for phase, count in sorted(pods_by_phase.items())
+        ]
+
+    def _running_pipeline_pods(
+        self,
+        pods: list[PodStatus],
+    ) -> list[PodStatus]:
+        return [
+            pod
+            for pod in pods
+            if pod.phase == "Running"
+            and pod.pipeline_step
+            and not self._is_infrastructure_pod(pod)
+        ]
+
+    def _format_pod_status_report(
+        self,
+        pods: list[PodStatus],
+    ) -> str:
+        return "\n".join(
+            [
+                "Kubernetes Pod Status Report",
+                "",
+                f"Total pods: {len(pods)}",
+                "",
+                "Pod phases:",
+                *self._format_pod_phase_section(pods),
+                "",
+                (
+                    "Possible Kubernetes phases: Pending, Running, Succeeded, "
+                    "Failed, Unknown."
+                ),
+            ]
+        )
+
+    def _format_running_steps_report(
+        self,
+        pods: list[PodStatus],
+    ) -> str:
+        pipeline_pods = self._running_pipeline_pods(pods)
+        lines = [
+            "Current Pipeline Steps",
+            "",
+            f"Running labeled pipeline pods: {len(pipeline_pods)}",
+            "",
+            "Step distribution:",
+        ]
+        if pipeline_pods:
+            lines.extend(self._format_pipeline_section(pipeline_pods))
+            lines.extend(
+                self._format_runtime_statistics_section(pipeline_pods)
+            )
+        else:
+            lines.append("- No active pipeline workflows.")
+        return "\n".join(lines)
+
+    def _format_cost_eta_report(
+        self,
+        pods: list[PodStatus],
+    ) -> str:
+        running_pods = [pod for pod in pods if pod.phase == "Running"]
+        pipeline_pods = self._running_pipeline_pods(pods)
+        return "\n".join(
+            [
+                "Cluster Cost and ETA",
+                *self._format_cost_section(running_pods),
+                *self._format_eta_section(pipeline_pods),
+            ]
+        )
 
     def _format_runtime_statistics_section(
         self,
@@ -277,7 +473,7 @@ class ClusterHealthAgent(BaseAgent):
 
         return "Not found", False
 
-    def _format_report(
+    def format_overall_health(
         self,
         pods: list[PodStatus],
         errors: list[str],
@@ -287,12 +483,7 @@ class ClusterHealthAgent(BaseAgent):
             if pod.phase == "Running"
         ]
 
-        pipeline_pods = [
-            pod
-            for pod in running_pods
-            if pod.pipeline_step
-            and not self._is_infrastructure_pod(pod)
-        ]
+        pipeline_pods = self._running_pipeline_pods(pods)
 
         other_running_pods = [
             pod
@@ -318,7 +509,14 @@ class ClusterHealthAgent(BaseAgent):
 
         overall_status = (
             "Healthy"
-            if infrastructure_healthy and not errors
+            if (
+                infrastructure_healthy
+                and not errors
+                and not any(
+                    pod.phase in {"Failed", "Unknown"}
+                    for pod in pods
+                )
+            )
             else "Degraded"
         )
 
@@ -326,7 +524,10 @@ class ClusterHealthAgent(BaseAgent):
             "Cluster Health Report",
             "",
             f"Overall status: {overall_status}",
-            f"Running pods: {len(running_pods)}",
+            f"Total pods: {len(pods)}",
+            "",
+            "Pod phases:",
+            *self._format_pod_phase_section(pods),
             "",
             "Infrastructure:",
             *infrastructure_lines,
@@ -370,3 +571,50 @@ class ClusterHealthAgent(BaseAgent):
         lines.extend(self._format_eta_section(pipeline_pods))
 
         return "\n".join(lines)
+
+    def _format_report(
+        self,
+        pods: list[PodStatus],
+        errors: list[str],
+    ) -> str:
+        """Compatibility alias for callers using the former private API."""
+
+        return self.format_overall_health(pods, errors)
+
+    @staticmethod
+    def format_analyzed_errors(errors: list[str]) -> str:
+        if not errors:
+            return "Analyzed Pod Errors\n\nNo recent pod errors found."
+
+        lines = [
+            "Analyzed Pod Errors",
+            "",
+            f"Findings: {len(errors)}",
+        ]
+        for index, analysis in enumerate(
+            analyze_pod_errors(errors),
+            start=1,
+        ):
+            lines.extend(
+                [
+                    "",
+                    f"{index}. Category: {analysis.category}",
+                    f"   Severity: {analysis.severity}",
+                    f"   Likely cause: {analysis.likely_cause}",
+                    f"   Evidence: {analysis.evidence}",
+                    f"   Recommended action: {analysis.recommended_action}",
+                ]
+            )
+        return "\n".join(lines)
+
+    @staticmethod
+    def _help() -> str:
+        return (
+            "Cluster Health Agent\n\n"
+            "Supported read-only requests:\n"
+            "- overall cluster health\n"
+            "- pod status counts and percentages\n"
+            "- currently running pipeline-step counts and percentages\n"
+            "- analyzed recent pod errors\n"
+            "- configured pod cost and ETA"
+        )

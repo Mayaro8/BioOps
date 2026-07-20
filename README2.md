@@ -305,10 +305,9 @@ It reports:
 The public `ifra-final` source currently lists active pipeline Pods
 individually.
 
-Grouped Cluster Health counts and percentages, average runtime, quartiles,
-shortest runtime, and longest runtime were part of the improvement work, but
-that code is not present in the current public `ifra-final` source. It must be
-merged before those features are claimed as active in this branch.
+Cluster Health groups pod phases and active pipeline steps into counts and
+percentages. It also reports average runtime, quartiles, shortest runtime, and
+longest runtime for active labeled pipeline Pods.
 
 #### Recent errors
 
@@ -563,8 +562,9 @@ D3 supports:
 - explicit Workflow status;
 - latest Workflow only when the user explicitly requests latest.
 
-All batch, sample, workflow, progress, pod, log, error, ETA, and runtime queries
-route to Batch Status. For one explicit batch it returns the persisted record
+All batch, sample, workflow, progress, pod, log, error, and runtime queries
+route to Batch Status. Cluster-wide pod cost and ETA remain with Cluster Health.
+For one explicit batch it returns the persisted record
 followed by live Argo processing state. Batch Status also owns D4 failed-pod
 diagnosis and reports. Submit Master owns only configuration/launch and
 explicitly confirmed retry operations.
@@ -890,18 +890,19 @@ resubmission.
 
 | Job | Manifest | Schedule | State | Data source | Output |
 |---|---|---:|---|---|---|
-| Cluster Health | `deploy/k8s/cluster-health/cronjob.yaml` | every 15 min | suspended | Kubernetes Pods/logs | Browser |
+| Cluster Health status | `deploy/k8s/cluster-health/cronjob.yaml` | hourly | suspended | Kubernetes Pods/logs | Browser |
+| Cluster Health errors | `deploy/k8s/cluster-health/error-cronjob.yaml` | every 30 min | suspended | Kubernetes Pod/container logs | Browser |
 | Batch sync/export | `deploy/k8s/batch-status/cronjob.yaml` | every 30 min | suspended | Argo Workflows | SQLite/CSV/JSON |
 | E1 VM cost/GPU | `deploy/k8s/infra-cost/cronjob.yaml` | every 15 min | suspended | Mock VM JSON | Browser |
 | E2 database | `database-health-cronjob.yaml` | every 15 min | suspended | Mock DB JSON | Browser |
 | E3 queue | `queue-health-cronjob.yaml` | every 10 min | suspended | Mock queue JSON | Browser |
 | E4 functions | `function-health-cronjob.yaml` | every 10 min | suspended | Mock function JSON | Browser |
 
-The Cluster Health job:
+The Cluster Health jobs:
 
-- sends a warning when recent errors exist;
-- sends status while labeled pipeline Pods are active;
-- sends nothing while idle and error-free.
+- send classified recent-error evidence and operator actions every 30 minutes;
+- send a complete health report every hour, including pod and step percentages;
+- send nothing from the error monitor when no recent error is present.
 
 Its manifest currently points to:
 
@@ -1349,14 +1350,11 @@ kubectl apply -k deploy/argo --dry-run=client
 
 ## 15. Current limitations
 
-1. Public Cluster Health source does not contain the final grouped
-   counts/percentages and runtime quartiles.
-2. Cluster error discovery remains keyword-based.
-3. Cluster Health alert URL must use the internal API Service.
-4. All proactive CronJobs are suspended.
-5. Batch Status processes only 100 Workflows and lacks Argo pagination.
-6. Batch Status persists attempts rather than latest sample state.
-7. Google Sheets synchronization is disabled.
+1. Cluster error discovery remains keyword-based before deterministic diagnosis.
+2. An in-cluster monitor cannot detect that its own cluster is powered off.
+3. Batch Status processes only 100 Workflows and lacks Argo pagination.
+4. Batch Status persists attempts rather than latest sample state.
+5. Google Sheets synchronization is disabled.
 8. E1-E4 use mock inputs rather than live infrastructure providers.
 9. Interactive Infra is omitted from deployed agent configuration.
 10. E2-E4 send healthy notifications and may create noise.

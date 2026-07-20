@@ -4,3 +4,4 @@ kind: Kustomization
 resources:
   - rbac.yaml
   - cronjob.yaml
+  - error-cronjob.yaml
