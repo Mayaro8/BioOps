@@ -4,7 +4,8 @@ metadata:
   name: batch-status-sync
   namespace: bioops-dev
 spec:
-  schedule: "*/15 * * * *"
+  schedule: "*/5 * * * *"
+  suspend: true
   timeZone: "Europe/Moscow"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3

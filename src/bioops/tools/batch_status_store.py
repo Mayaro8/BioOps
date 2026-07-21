@@ -95,6 +95,19 @@ class BatchStatusStore:
             )
             return [dict(row) for row in cursor.fetchall()]
 
+    def list_all_rows(self) -> list[dict[str, str]]:
+        self.initialize()
+
+        with self._connect() as connection:
+            cursor = connection.execute(
+                f"""
+                SELECT {", ".join(SHEET_COLUMNS)}
+                FROM batch_status
+                ORDER BY last_checked_at DESC
+                """
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
     def find_by_batch_id(self, batch_id: str) -> list[dict[str, str]]:
         self.initialize()
 

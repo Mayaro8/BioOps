@@ -1,18 +1,24 @@
 from __future__ import annotations
 
+import csv
+import io
 import json
 import logging
 import os
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import parse_qs
 
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
 
+from bioops.api.batch_status_page import BATCH_STATUS_PAGE
 from bioops.graph_orchestrator import run_graph
-from bioops.tools.notification_store import NotificationStore
+from bioops.tools.batch_status_rows import SHEET_COLUMNS
+from bioops.tools.batch_status_store import BatchStatusStore
 from bioops.tools.bitrix_sender import BitrixSender
+from bioops.tools.notification_store import NotificationStore
 
 
 logger = logging.getLogger(__name__)
@@ -25,6 +31,7 @@ app = FastAPI(
 bitrix_sender = BitrixSender()
 
 _notification_store: NotificationStore | None = None
+_batch_status_store: BatchStatusStore | None = None
 
 
 def get_notification_store() -> NotificationStore:
@@ -40,6 +47,19 @@ def get_notification_store() -> NotificationStore:
         )
 
     return _notification_store
+
+
+def get_batch_status_store() -> BatchStatusStore:
+    global _batch_status_store
+
+    if _batch_status_store is None:
+        db_path = os.getenv(
+            "BATCH_STATUS_DB_PATH",
+            "/data/bioops_batch_status.sqlite3",
+        )
+        _batch_status_store = BatchStatusStore(db_path)
+
+    return _batch_status_store
 
 
 class ChatRequest(BaseModel):
@@ -85,6 +105,35 @@ CHAT_PAGE = """
 
     h1 {
       margin-bottom: 4px;
+    }
+
+    .chat-nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 24px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid #374151;
+    }
+
+    .chat-nav strong {
+      color: #f9fafb;
+    }
+
+    .chat-nav-links {
+      display: flex;
+      gap: 18px;
+    }
+
+    .chat-nav a {
+      color: #cbd5e1;
+      font-size: 0.9rem;
+      font-weight: 600;
+      text-decoration: none;
+    }
+
+    .chat-nav a[aria-current="page"] {
+      color: #93c5fd;
     }
 
     .subtitle {
@@ -209,14 +258,14 @@ CHAT_PAGE = """
 }
 
 #notification-header::before {
-  content: "▶";
+  content: "+";
   display: inline-block;
   margin-right: 8px;
   font-size: 0.75rem;
 }
 
 #notification-panel[data-open="true"] #notification-header::before {
-  content: "▼";
+  content: "-";
 }
 
 #notification-panel[data-open="false"] #notification-items {
@@ -233,6 +282,13 @@ CHAT_PAGE = """
 
 <body>
   <main>
+    <nav class="chat-nav" aria-label="Primary navigation">
+      <strong>BioOps</strong>
+      <span class="chat-nav-links">
+        <a href="/" aria-current="page">Chat</a>
+        <a href="/batches">Batch status</a>
+      </span>
+    </nav>
     <h1>BioOps Chat</h1>
     <p class="subtitle">
       Ask about workflows, batches, cluster health, storage, documentation, or code review.
@@ -499,9 +555,188 @@ CHAT_PAGE = """
 """
 
 
+ACTIVE_BATCH_STATUSES = {"pending", "running"}
+FAILED_BATCH_STATUSES = {"failed", "error"}
+COMPLETED_BATCH_STATUSES = {"succeeded", "completed"}
+VALID_BATCH_FILTERS = {"", "active", "failed", "completed", "stale"}
+
+
+def _batch_status_group(status: str) -> str:
+    normalized = status.strip().lower()
+
+    if normalized in ACTIVE_BATCH_STATUSES:
+        return "active"
+    if normalized in FAILED_BATCH_STATUSES:
+        return "failed"
+    if normalized in COMPLETED_BATCH_STATUSES:
+        return "completed"
+
+    return "other"
+
+
+def _parse_timestamp(value: str) -> datetime | None:
+    if not value:
+        return None
+
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+
+    return parsed.astimezone(timezone.utc)
+
+
+def _stale_minutes() -> int:
+    raw_value = os.getenv("BATCH_STATUS_STALE_MINUTES", "30")
+
+    try:
+        return max(1, int(raw_value))
+    except ValueError:
+        return 30
+
+
+def _prepare_batch_rows(
+    rows: list[dict[str, str]],
+    *,
+    search: str,
+    status: str,
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    now = datetime.now(timezone.utc)
+    stale_before = now - timedelta(minutes=_stale_minutes())
+    prepared: list[dict[str, Any]] = []
+
+    for row in rows:
+        checked_at = _parse_timestamp(row.get("last_checked_at", ""))
+        is_stale = (
+            _batch_status_group(row.get("status", "")) == "active"
+            and checked_at is not None
+            and checked_at < stale_before
+        )
+        prepared.append({**row, "is_stale": is_stale})
+
+    summary = {
+        "total": len(prepared),
+        "active": sum(
+            _batch_status_group(str(row["status"])) == "active"
+            for row in prepared
+        ),
+        "failed": sum(
+            _batch_status_group(str(row["status"])) == "failed"
+            for row in prepared
+        ),
+        "completed": sum(
+            _batch_status_group(str(row["status"])) == "completed"
+            for row in prepared
+        ),
+        "stale": sum(bool(row["is_stale"]) for row in prepared),
+    }
+
+    normalized_search = search.strip().lower()
+    normalized_status = status.strip().lower()
+
+    if normalized_status not in VALID_BATCH_FILTERS:
+        raise HTTPException(
+            status_code=400,
+            detail="Unknown batch status filter.",
+        )
+
+    filtered = prepared
+
+    if normalized_search:
+        filtered = [
+            row
+            for row in filtered
+            if any(
+                normalized_search in str(row.get(column, "")).lower()
+                for column in SHEET_COLUMNS
+            )
+        ]
+
+    if normalized_status == "stale":
+        filtered = [row for row in filtered if row["is_stale"]]
+    elif normalized_status:
+        filtered = [
+            row
+            for row in filtered
+            if _batch_status_group(str(row["status"])) == normalized_status
+        ]
+
+    return filtered, summary
+
+
 @app.get("/", response_class=HTMLResponse)
 def chat_page() -> str:
     return CHAT_PAGE
+
+
+@app.get("/batches", response_class=HTMLResponse)
+def batch_status_page() -> str:
+    return BATCH_STATUS_PAGE
+
+
+@app.get("/api/batches")
+def list_batch_status(
+    search: str = "",
+    status: str = "",
+    limit: int = Query(default=250, ge=1, le=1000),
+) -> dict[str, Any]:
+    rows = get_batch_status_store().list_all_rows()
+    filtered, summary = _prepare_batch_rows(
+        rows,
+        search=search,
+        status=status,
+    )
+    latest_update = next(
+        (
+            row["last_checked_at"]
+            for row in rows
+            if row.get("last_checked_at")
+        ),
+        "",
+    )
+
+    return {
+        "items": filtered[:limit],
+        "matching": len(filtered),
+        "summary": summary,
+        "latest_update": latest_update,
+    }
+
+
+@app.get("/batch-status.csv")
+def download_batch_status_csv(
+    search: str = "",
+    status: str = "",
+) -> Response:
+    rows = get_batch_status_store().list_all_rows()
+    filtered, _ = _prepare_batch_rows(
+        rows,
+        search=search,
+        status=status,
+    )
+    output = io.StringIO(newline="")
+    writer = csv.DictWriter(output, fieldnames=SHEET_COLUMNS)
+    writer.writeheader()
+    writer.writerows(
+        {
+            column: str(row.get(column, ""))
+            for column in SHEET_COLUMNS
+        }
+        for row in filtered
+    )
+
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": (
+                'attachment; filename="bioops-batch-status.csv"'
+            )
+        },
+    )
 
 
 @app.post("/internal/alerts")

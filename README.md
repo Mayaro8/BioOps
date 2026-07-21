@@ -711,6 +711,12 @@ Open the browser interface:
 https://bioops.84-201-181-221.sslip.io/
 ```
 
+Open the live batch-status dashboard:
+
+```text
+https://bioops.84-201-181-221.sslip.io/batches
+```
+
 ---
 
 ## 19. Agent acceptance prompts

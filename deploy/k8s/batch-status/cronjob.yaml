@@ -7,7 +7,7 @@ metadata:
     app.kubernetes.io/name: batch-status-sync
     app.kubernetes.io/part-of: bioops
 spec:
-  schedule: "*/30 * * * *"
+  schedule: "*/5 * * * *"
   timeZone: "Europe/Moscow"
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 300
