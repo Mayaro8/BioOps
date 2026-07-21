@@ -111,6 +111,19 @@ def test_prompt_contains_batch_status_guidance():
     assert '"agent": "batch_status|general"' in prompt
 
 
+def test_prompt_separates_workflow_health_from_batch_tracking():
+    tool = LLMRouterTool(
+        allowed_agents={"batch_status", "cluster_health", "general"}
+    )
+    prompt = tool._build_prompt("show workflow pod health")
+
+    assert "health across workflows and their pods" in prompt
+    assert "pod-phase" in prompt
+    assert "master node report" in prompt
+    assert "control-plane report" in prompt
+    assert "selected batch/sample status" in prompt
+
+
 def test_prompt_contains_storage_guidance():
     tool = LLMRouterTool(allowed_agents={"general", "storage"})
     prompt = tool._build_prompt("list vcf.gz objects")

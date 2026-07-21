@@ -60,7 +60,7 @@ class GeneralAgent(BaseAgent):
                 "",
                 "BioOps is a multi-agent assistant for bioinformatics operations, including:",
                 "- knowledge retrieval",
-                "- Kubernetes cluster health monitoring",
+                "- Argo workflow Pod health monitoring",
                 "- batch and pipeline status reporting",
                 "- code and pull request review",
                 "- storage inventory summaries",

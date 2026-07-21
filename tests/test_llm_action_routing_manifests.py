@@ -24,13 +24,18 @@ def test_kustomize_generates_demo_bucket_inventory_configmap():
     ]
 
 
-def test_api_mounts_bucket_inventory_and_new_image_tag():
+def test_api_mounts_bucket_inventory_and_registry_image():
     deployment = yaml.safe_load(
         (ROOT / "deploy/k8s/bioops-api/deployment.yaml").read_text(encoding="utf-8")
     )
     pod_spec = deployment["spec"]["template"]["spec"]
     container = pod_spec["containers"][0]
-    assert container["image"].endswith(":k8s-demo-llm-routing-20260710")
+    image_name, separator, image_tag = container["image"].rpartition(":")
+    assert image_name == (
+        "cr.yandex/crp5l1da4kinv8ofomr5/fastmri-students/bioops"
+    )
+    assert separator == ":"
+    assert image_tag
 
     mounts = {row["name"]: row for row in container["volumeMounts"]}
     assert mounts["bucket-inventory"]["mountPath"] == "/app/data/bucket_inventory.csv"
@@ -38,3 +43,27 @@ def test_api_mounts_bucket_inventory_and_new_image_tag():
 
     volumes = {row["name"]: row for row in pod_spec["volumes"]}
     assert volumes["bucket-inventory"]["configMap"]["name"] == "bioops-bucket-inventory"
+
+
+def test_api_optionally_mounts_multi_cluster_kubeconfig():
+    deployment = yaml.safe_load(
+        (ROOT / "deploy/k8s/bioops-api/deployment.yaml").read_text(
+            encoding="utf-8"
+        )
+    )
+    pod_spec = deployment["spec"]["template"]["spec"]
+    container = pod_spec["containers"][0]
+    environment = {row["name"]: row for row in container["env"]}
+    assert environment["KUBECONFIG"]["value"] == (
+        "/etc/bioops/kubeconfig/config"
+    )
+
+    mounts = {row["name"]: row for row in container["volumeMounts"]}
+    assert mounts["cluster-kubeconfig"]["readOnly"] is True
+
+    volumes = {row["name"]: row for row in pod_spec["volumes"]}
+    secret = volumes["cluster-kubeconfig"]["secret"]
+    assert secret == {
+        "secretName": "bioops-cluster-kubeconfig",
+        "optional": True,
+    }

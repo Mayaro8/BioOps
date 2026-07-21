@@ -73,7 +73,7 @@ def test_hourly_check_always_sends_full_status(monkeypatch) -> None:
     assert FakeAlertTool.records == [
         (
             "status",
-            "Hourly cluster health: Healthy",
+            "Hourly workflow health: Healthy",
             "info",
             "Overall status: Healthy\nTotal pods: 2",
         )
@@ -86,7 +86,7 @@ def test_hourly_check_sends_status_while_idle(monkeypatch) -> None:
     cluster_health_monitor.main("status")
 
     assert FakeAlertTool.records[0][0] == "status"
-    assert FakeAlertTool.records[0][1] == "Hourly cluster health: Healthy"
+    assert FakeAlertTool.records[0][1] == "Hourly workflow health: Healthy"
 
 
 def test_error_check_sends_analyzed_critical_notification(monkeypatch) -> None:
@@ -96,7 +96,7 @@ def test_error_check_sends_analyzed_critical_notification(monkeypatch) -> None:
 
     assert FakeAlertTool.records[0][:3] == (
         "alert",
-        "1 recent Kubernetes pod error finding",
+        "1 recent workflow pod error finding",
         "critical",
     )
     assert "Analyzed Pod Errors" in FakeAlertTool.records[0][3]

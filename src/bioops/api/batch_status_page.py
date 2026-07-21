@@ -120,6 +120,15 @@ BATCH_STATUS_PAGE = """
       font-size: 0.82rem;
     }
 
+    .logout-form {
+      margin-left: 18px;
+    }
+
+    .logout-form button {
+      min-height: 34px;
+      padding: 0 11px;
+    }
+
     .connection-dot {
       width: 8px;
       height: 8px;
@@ -610,6 +619,9 @@ BATCH_STATUS_PAGE = """
       <span class="connection-dot" aria-hidden="true"></span>
       <span id="connection-text">Loading data</span>
     </div>
+    <form class="logout-form" method="post" action="/logout">
+      <button type="submit">Sign out</button>
+    </form>
   </header>
 
   <main>

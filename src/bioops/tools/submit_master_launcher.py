@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Any
 
@@ -10,6 +11,19 @@ from kubernetes import client, config
 
 logger = logging.getLogger(__name__)
 IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$")
+KUBE_CONTEXT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,252}$")
+NAMESPACE = re.compile(
+    r"^[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?$"
+)
+
+
+@dataclass(frozen=True)
+class MockLaunchTarget:
+    batch_id: str
+    input_prefix: str
+    stage: str = "all"
+    cluster_context: str | None = None
+    namespace: str | None = None
 
 
 def normalize_config_path(value: str, mount_root: str = "/mnt/pipeline-v3.0") -> str:
@@ -39,11 +53,24 @@ class SubmitMasterWorkflowLauncher:
         self.namespace = namespace
         self.template_name = template_name
 
-    def launch(self, *, config_path: str, batch_id: str | None = None) -> str:
+    @staticmethod
+    def _custom_objects_api(
+        cluster_context: str | None = None,
+    ) -> Any:
+        if cluster_context:
+            api_client = config.new_client_from_config(
+                context=cluster_context
+            )
+            return client.CustomObjectsApi(api_client)
+
         try:
             config.load_incluster_config()
         except config.ConfigException:
             config.load_kube_config()
+        return client.CustomObjectsApi()
+
+    def launch(self, *, config_path: str, batch_id: str | None = None) -> str:
+        custom_api = self._custom_objects_api()
 
         labels = {"bioops.dev/workload": "submit-master"}
         if batch_id:
@@ -72,7 +99,7 @@ class SubmitMasterWorkflowLauncher:
             config_path,
             batch_id or "unknown",
         )
-        created = client.CustomObjectsApi().create_namespaced_custom_object(
+        created = custom_api.create_namespaced_custom_object(
             group="argoproj.io",
             version="v1alpha1",
             namespace=self.namespace,
@@ -100,10 +127,17 @@ class SubmitMasterWorkflowLauncher:
         batch_id: str,
         input_prefix: str,
         stage: str,
+        cluster_context: str | None = None,
+        namespace: str | None = None,
     ) -> str:
+        effective_namespace = namespace or self.namespace
         for name, value in {"batch_id": batch_id}.items():
             if not IDENTIFIER.fullmatch(value):
                 raise ValueError(f"{name} is invalid")
+        if cluster_context and not KUBE_CONTEXT.fullmatch(cluster_context):
+            raise ValueError("cluster_context is invalid")
+        if not NAMESPACE.fullmatch(effective_namespace):
+            raise ValueError("namespace is invalid")
         if stage not in {"all", "1", "2", "3"}:
             raise ValueError("stage must be all, 1, 2, or 3")
         if not input_prefix.startswith("/mock-data/"):
@@ -111,10 +145,7 @@ class SubmitMasterWorkflowLauncher:
         if "\n" in input_prefix or "\r" in input_prefix or ".." in input_prefix.split("/"):
             raise ValueError("input_prefix is invalid")
 
-        try:
-            config.load_incluster_config()
-        except config.ConfigException:
-            config.load_kube_config()
+        custom_api = self._custom_objects_api(cluster_context)
 
         parameters = {
             "batch_id": batch_id,
@@ -126,7 +157,7 @@ class SubmitMasterWorkflowLauncher:
             "kind": "Workflow",
             "metadata": {
                 "generateName": "bioops-fastq-mock-",
-                "namespace": self.namespace,
+                "namespace": effective_namespace,
                 "labels": {
                     "bioops.dev/workload": "submit-master",
                     "bioops.dev/batch-id": batch_id,
@@ -140,10 +171,10 @@ class SubmitMasterWorkflowLauncher:
                 ]},
             },
         }
-        created = client.CustomObjectsApi().create_namespaced_custom_object(
+        created = custom_api.create_namespaced_custom_object(
             group="argoproj.io",
             version="v1alpha1",
-            namespace=self.namespace,
+            namespace=effective_namespace,
             plural="workflows",
             body=body,
         )
@@ -153,8 +184,70 @@ class SubmitMasterWorkflowLauncher:
             "SubmitMaster Mock Launch",
             "",
             f"Workflow: {workflow}",
+            f"Cluster: {cluster_context or 'current'}",
+            f"Namespace: {effective_namespace}",
             f"Batch: {batch_id}",
             f"Input prefix: {input_prefix}",
             f"Stage: {stage}",
             "Status: submitted",
         ])
+
+    def launch_mock_many(
+        self,
+        targets: list[MockLaunchTarget],
+    ) -> str:
+        results: list[tuple[MockLaunchTarget, bool, str]] = []
+
+        for target in targets:
+            try:
+                report = self.launch_mock(
+                    batch_id=target.batch_id,
+                    input_prefix=target.input_prefix,
+                    stage=target.stage,
+                    cluster_context=target.cluster_context,
+                    namespace=target.namespace,
+                )
+                workflow = next(
+                    (
+                        line.removeprefix("Workflow: ")
+                        for line in report.splitlines()
+                        if line.startswith("Workflow: ")
+                    ),
+                    "unknown",
+                )
+                results.append((target, True, workflow))
+            except Exception as error:
+                results.append(
+                    (
+                        target,
+                        False,
+                        f"{type(error).__name__}: {error}",
+                    )
+                )
+
+        submitted = sum(1 for _, success, _ in results if success)
+        lines = [
+            "SubmitMaster Multi-Cluster Launch",
+            "",
+            f"Targets requested: {len(results)}",
+            f"Submitted: {submitted}",
+            f"Failed: {len(results) - submitted}",
+            "",
+            "Results:",
+        ]
+        for target, success, detail in results:
+            location = (
+                f"{target.cluster_context or 'current'}/"
+                f"{target.namespace or self.namespace}"
+            )
+            if success:
+                lines.append(
+                    f"- {location} | {target.batch_id}: submitted "
+                    f"as {detail}"
+                )
+            else:
+                lines.append(
+                    f"- {location} | {target.batch_id}: failed ({detail})"
+                )
+
+        return "\n".join(lines)

@@ -62,20 +62,30 @@ class AzureChatClient:
 
         for index, chunk in enumerate(chunks, start=1):
             source = chunk.metadata.get("source", "unknown source")
+            source_url = chunk.metadata.get("page_url", "")
             chunk_number = chunk.metadata.get("chunk_number", "unknown")
             score = chunk.score
 
-            blocks.append(
-                "\n".join(
-                    [
-                        f"[Chunk {index}]",
-                        f"Source: {source}",
-                        f"Chunk number: {chunk_number}",
-                        f"Score: {score:.4f}" if score is not None else "Score: unknown",
-                        "Text:",
-                        chunk.text,
-                    ]
-                )
+            lines = [
+                f"[Chunk {index}]",
+                f"Source: {source}",
+            ]
+
+            if source_url:
+                lines.append(f"Source URL: {source_url}")
+
+            lines.extend(
+                [
+                    f"Chunk number: {chunk_number}",
+                    (
+                        f"Score: {score:.4f}"
+                        if score is not None
+                        else "Score: unknown"
+                    ),
+                    "Text:",
+                    chunk.text,
+                ]
             )
+            blocks.append("\n".join(lines))
 
         return "\n\n---\n\n".join(blocks)

@@ -1,0 +1,61 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: bioops-init-retry-watchdog
+  namespace: bioops-dev
+  labels:
+    app: bioops
+    component: init-retry-watchdog
+    epic: c
+spec:
+  schedule: "* * * * *"
+  timeZone: "Europe/Moscow"
+  suspend: false
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 60
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 120
+
+      template:
+        metadata:
+          labels:
+            app: bioops
+            component: init-retry-watchdog
+            epic: c
+
+        spec:
+          serviceAccountName: bioops-student
+          restartPolicy: Never
+
+          nodeSelector:
+            genoteknodetype: fastmri-cpu
+
+          tolerations:
+            - key: yandex.cloud/preemptible
+              operator: Equal
+              value: "true"
+              effect: NoSchedule
+
+          containers:
+            - name: watchdog
+              image: cr.yandex/crp5l1da4kinv8ofomr5/fastmri-students/bioops:cluster-health-eta-20260717-104554-msk
+              imagePullPolicy: Always
+              command:
+                - python3
+                - -m
+                - bioops.jobs.init_retry_watchdog
+                - --threshold-minutes
+                - "30"
+
+              envFrom:
+                - configMapRef:
+                    name: bioops-config
+
+              env:
+                - name: PYTHONPATH
+                  value: /app/src

@@ -8,6 +8,7 @@ from bioops.jobs.mock_fastq_config_creator import create_config
 from bioops.jobs.mock_submit_master import build_workflow
 from bioops.tools.llm_action_router import ActionDecision
 from bioops.tools.submit_master_launcher import SubmitMasterWorkflowLauncher
+from bioops.tools.submit_master_launcher import MockLaunchTarget
 
 
 def seed(directory: Path, samples=("sample1", "sample2")):
@@ -37,14 +38,17 @@ def make_agent():
     agent = SubmitMasterAgent.__new__(SubmitMasterAgent)
     agent.action_router = FakeRouter()
     agent.launcher = SimpleNamespace(
+        namespace="bioops-dev",
         launch_mock=lambda **values: f"launched {values['batch_id']}"
     )
+    agent.max_launch_targets = 20
     return agent
 
 
 def test_launch_assessment_does_not_mutate():
     agent = make_agent()
     agent.launcher = SimpleNamespace(
+        namespace="bioops-dev",
         launch_mock=lambda **_values: pytest.fail("unconfirmed launch must not run")
     )
     response = agent.run("launch the batch")
@@ -105,6 +109,11 @@ def test_submit_master_fans_out_one_chain_per_sample(tmp_path):
     assert tasks[9]["dependencies"] == ["sample1-filter-variants"]
     labels = workflow["spec"]["templates"][1]["metadata"]["labels"]
     assert labels["bioops.dev/sample-id"] == "sample1"
+    for template in workflow["spec"]["templates"][1:]:
+        assert template["retryStrategy"] == {
+            "limit": "5",
+            "retryPolicy": "OnError",
+        }
 
 
 def test_launcher_submits_batch_prefix(monkeypatch):
@@ -136,3 +145,134 @@ def test_launcher_submits_batch_prefix(monkeypatch):
         "stage": "2",
     }
     assert "Status: submitted" in response
+
+
+def test_launcher_uses_named_kube_context(monkeypatch):
+    received = {}
+
+    class FakeApi:
+        def __init__(self, api_client):
+            received["api_client"] = api_client
+
+        def create_namespaced_custom_object(self, **kwargs):
+            received.update(kwargs)
+            return {"metadata": {"name": "workflow-cluster-b"}}
+
+    monkeypatch.setattr(
+        "bioops.tools.submit_master_launcher.config.new_client_from_config",
+        lambda **kwargs: f"client:{kwargs['context']}",
+    )
+    monkeypatch.setattr(
+        "bioops.tools.submit_master_launcher.client.CustomObjectsApi",
+        FakeApi,
+    )
+
+    report = SubmitMasterWorkflowLauncher(
+        "bioops-dev", "bioops-fastq-mock"
+    ).launch_mock(
+        batch_id="batch-b",
+        input_prefix="/mock-data/batch-b",
+        stage="all",
+        cluster_context="cluster-b",
+        namespace="bioops-prod",
+    )
+
+    assert received["api_client"] == "client:cluster-b"
+    assert received["namespace"] == "bioops-prod"
+    assert "Cluster: cluster-b" in report
+    assert "Namespace: bioops-prod" in report
+
+
+def test_multi_cluster_launch_continues_after_one_failure(monkeypatch):
+    launcher = SubmitMasterWorkflowLauncher(
+        "bioops-dev", "bioops-fastq-mock"
+    )
+
+    def launch_mock(**values):
+        if values["cluster_context"] == "cluster-b":
+            raise RuntimeError("cluster unavailable")
+        return "SubmitMaster Mock Launch\n\nWorkflow: workflow-a"
+
+    monkeypatch.setattr(launcher, "launch_mock", launch_mock)
+    report = launcher.launch_mock_many(
+        [
+            MockLaunchTarget(
+                "batch-a", "/mock-data/batch-a", cluster_context="cluster-a"
+            ),
+            MockLaunchTarget(
+                "batch-b", "/mock-data/batch-b", cluster_context="cluster-b"
+            ),
+        ]
+    )
+
+    assert "Targets requested: 2" in report
+    assert "Submitted: 1" in report
+    assert "Failed: 1" in report
+    assert "cluster-a/bioops-dev | batch-a: submitted as workflow-a" in report
+    assert "cluster-b/bioops-dev | batch-b: failed" in report
+
+
+def test_multi_cluster_launch_uses_one_exact_confirmation():
+    targets = [
+        {
+            "batch_id": "batch-a",
+            "input_prefix": "/mock-data/batch-a",
+            "stage": "1",
+            "cluster_context": "cluster-a",
+            "namespace": "bioops-dev",
+        },
+        {
+            "batch_id": "batch-b",
+            "input_prefix": "/mock-data/batch-b",
+            "stage": "2",
+            "cluster_context": "cluster-b",
+            "namespace": "bioops-dev",
+        },
+    ]
+
+    class MultiRouter:
+        def route(self, _message):
+            return ActionDecision(
+                "launch_submit_master",
+                {"launch_targets": targets},
+                "test",
+            )
+
+    agent = SubmitMasterAgent.__new__(SubmitMasterAgent)
+    agent.action_router = MultiRouter()
+    agent.max_launch_targets = 20
+    agent.launcher = SimpleNamespace(
+        namespace="bioops-dev",
+        launch_mock_many=lambda values: f"launched {len(values)} targets",
+    )
+
+    assessment = agent.run("launch both batches")
+    confirmation = assessment.split("Send exactly to launch all targets:\n", 1)[1]
+
+    assert "No workflow was created" in assessment
+    assert confirmation.startswith("CONFIRM MOCK MULTI-LAUNCH [")
+    agent.action_router = SimpleNamespace(
+        route=lambda _message: pytest.fail(
+            "structured confirmation must not require the LLM"
+        )
+    )
+    assert agent.run(confirmation) == "launched 2 targets"
+
+
+def test_invalid_multi_cluster_confirmation_fails_closed():
+    agent = make_agent()
+
+    report = agent.run("CONFIRM MOCK MULTI-LAUNCH not-json")
+
+    assert "confirmation is invalid" in report
+    assert "No workflow was created" in report
+
+
+def test_submit_master_prompt_supports_multi_cluster_targets():
+    prompt = SubmitMasterAgent._build_action_router()._build_prompt(
+        "launch two batches in two clusters"
+    )
+
+    assert "launch_targets" in prompt
+    assert "cluster-a" in prompt
+    assert "cluster-b" in prompt

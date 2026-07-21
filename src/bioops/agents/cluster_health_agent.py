@@ -7,7 +7,11 @@ import yaml
 from bioops.agents.base import BaseAgent
 from bioops.tools.cost_tool import CostTool
 from bioops.tools.eta_tool import ETATool
-from bioops.tools.k8s_health import K8sHealthTool, PodStatus
+from bioops.tools.k8s_health import (
+    K8sHealthTool,
+    NodePressureReport,
+    PodStatus,
+)
 from bioops.tools.llm_action_router import (
     LLMActionRouter,
     format_action_routing_error,
@@ -16,15 +20,13 @@ from bioops.tools.pod_error_analysis import analyze_pod_errors
 
 
 class ClusterHealthAgent(BaseAgent):
-    """Report concise current Kubernetes health for BioOps."""
+    """Report Argo workflow health from its Kubernetes pods."""
 
     name = "cluster_health"
-    description = "Checks Kubernetes services, active pipeline steps, cost, and ETA."
-
-    INFRASTRUCTURE = {
-        "bioops-api": "bioops-api",
-        "qdrant": "qdrant",
-    }
+    description = (
+        "Reports workflow pod phases, active steps, errors, runtime, cost, "
+        "and ETA."
+    )
 
     def __init__(
         self,
@@ -59,6 +61,10 @@ class ClusterHealthAgent(BaseAgent):
             1,
             int(cluster_config.get("error_report_limit", 20)),
         )
+        self.max_batches = max(
+            1,
+            int(cluster_config.get("max_batches", 10)),
+        )
         self.action_router = action_router or self._build_action_router()
 
     def run(self, message: str) -> str:
@@ -80,6 +86,11 @@ class ClusterHealthAgent(BaseAgent):
                 )
                 return self.format_analyzed_errors(errors)
 
+            if decision.action == "node_pressure":
+                return self._format_node_pressure_report(
+                    self.health_tool.get_node_pressure_report()
+                )
+
             pods = self.health_tool.get_pods()
 
             if decision.action == "pod_statuses":
@@ -96,15 +107,22 @@ class ClusterHealthAgent(BaseAgent):
             )
             return self.format_overall_health(pods, errors)
         except Exception as error:
+            if decision.action == "node_pressure":
+                return (
+                    "Kubernetes Node Pressure Report\n\n"
+                    "Overall status: Unavailable\n"
+                    f"Reason: failed to query Kubernetes nodes: {error}"
+                )
+
             cost_report = self.cost_tool.estimate_cluster_cost(
                 runtime_minutes=0.0
             )
             currency = str(cost_report.currency).upper()
 
             return (
-                "Cluster Health Report\n\n"
+                "Workflow Health Report\n\n"
                 "Overall status: Unavailable\n"
-                f"Reason: failed to query Kubernetes: {error}\n\n"
+                f"Reason: failed to query workflow pods: {error}\n\n"
                 "Cost:\n"
                 f"- Estimated cost: "
                 f"{cost_report.total_cost_usd:.2f} {currency}\n"
@@ -117,33 +135,40 @@ class ClusterHealthAgent(BaseAgent):
             agent_name="Cluster Health Agent",
             actions={
                 "overall_health": (
-                    "Return the full current cluster health report, including "
-                    "pod phases, running steps, errors, cost, and ETA."
+                    "Return workflow health aggregated by batch, including "
+                    "workflow states, pod phases, running steps, errors, cost, "
+                    "and ETA."
                 ),
                 "pod_statuses": (
-                    "Return Kubernetes pod-phase counts and percentages."
+                    "Return batch-level workflow and pod-phase counts and "
+                    "percentages."
                 ),
                 "running_steps": (
-                    "Return the pipeline steps currently running, with pod "
-                    "counts and percentages."
+                    "Return running pipeline steps grouped by batch, with "
+                    "pod counts and percentages."
                 ),
                 "recent_errors": (
-                    "Return analyzed recent pod and container errors."
+                    "Return analyzed recent workflow pod and container errors."
                 ),
                 "cost_eta": (
-                    "Return the configured current pod cost estimate and ETA."
+                    "Return cost and ETA grouped by active batch."
                 ),
-                "help": "Explain the read-only Cluster Health capabilities.",
+                "node_pressure": (
+                    "Return Kubernetes worker-node readiness, resource "
+                    "pressure, capacity, usage, and workflow scheduling "
+                    "blockers."
+                ),
+                "help": "Explain the read-only workflow health capabilities.",
             },
             rules=[
                 "This agent is read-only and must never restart or delete pods.",
                 (
-                    "Choose overall_health for broad health or cluster-state "
+                    "Choose overall_health for broad workflow execution health "
                     "requests."
                 ),
                 (
-                    "Choose pod_statuses for requests specifically about pod "
-                    "phases."
+                    "Choose pod_statuses for requests about a workflow's pods "
+                    "or pod phases."
                 ),
                 (
                     "Choose running_steps for requests specifically about "
@@ -157,13 +182,23 @@ class ClusterHealthAgent(BaseAgent):
                     "Choose cost_eta when cost or completion ETA is the main "
                     "request."
                 ),
+                (
+                    "Choose node_pressure for node readiness, MemoryPressure, "
+                    "DiskPressure, PIDPressure, resource capacity, or "
+                    "unschedulable pods."
+                ),
+                (
+                    "Treat master node report, control-plane report, node "
+                    "health report, and cluster capacity report as "
+                    "node_pressure requests."
+                ),
             ],
             examples=[
                 {
-                    "request": "How healthy is the cluster overall?",
+                    "request": "How healthy are the running workflows?",
                     "action": "overall_health",
                     "parameters": {},
-                    "reason": "The user requested a broad cluster report.",
+                    "reason": "The user requested workflow execution health.",
                 },
                 {
                     "request": "What pipeline steps are running now?",
@@ -177,8 +212,131 @@ class ClusterHealthAgent(BaseAgent):
                     "parameters": {},
                     "reason": "The request asks for failed-pod diagnosis.",
                 },
+                {
+                    "request": "Are the Kubernetes nodes under pressure?",
+                    "action": "node_pressure",
+                    "parameters": {},
+                    "reason": "The request asks about worker-node pressure.",
+                },
+                {
+                    "request": "Show master node report",
+                    "action": "node_pressure",
+                    "parameters": {},
+                    "reason": (
+                        "The request asks for the available Kubernetes API "
+                        "and visible node health report."
+                    ),
+                },
             ],
         )
+
+    @staticmethod
+    def _format_node_pressure_report(report: NodePressureReport) -> str:
+        total_nodes = len(report.nodes)
+
+        def count(attribute: str) -> int:
+            return sum(
+                1 for node in report.nodes if getattr(node, attribute)
+            )
+
+        def percentage(value: int, total: int) -> float:
+            return value / total * 100 if total else 0.0
+
+        ready = count("ready")
+        not_ready = total_nodes - ready
+        memory_pressure = count("memory_pressure")
+        disk_pressure = count("disk_pressure")
+        pid_pressure = count("pid_pressure")
+        network_unavailable = count("network_unavailable")
+        degraded = any(
+            (
+                not_ready,
+                memory_pressure,
+                disk_pressure,
+                pid_pressure,
+                network_unavailable,
+                report.unschedulable_workflow_pods,
+            )
+        )
+
+        def metric(value: float | None) -> str:
+            return f"{value:.1f}%" if value is not None else "Unavailable"
+
+        lines = [
+            "Kubernetes Node Pressure Report",
+            "",
+            f"Overall status: {'Degraded' if degraded else 'Healthy'}",
+            "Kubernetes API: Available",
+            (
+                "Scope: Kubernetes API and visible worker nodes; managed "
+                "control-plane internals are provider-managed."
+            ),
+            f"Nodes observed: {total_nodes}",
+            f"Ready nodes: {ready} ({percentage(ready, total_nodes):.1f}%)",
+            (
+                f"NotReady nodes: {not_ready} "
+                f"({percentage(not_ready, total_nodes):.1f}%)"
+            ),
+            "",
+            "Resource pressure:",
+            (
+                f"- MemoryPressure: {memory_pressure} nodes "
+                f"({percentage(memory_pressure, total_nodes):.1f}%)"
+            ),
+            (
+                f"- DiskPressure: {disk_pressure} nodes "
+                f"({percentage(disk_pressure, total_nodes):.1f}%)"
+            ),
+            (
+                f"- PIDPressure: {pid_pressure} nodes "
+                f"({percentage(pid_pressure, total_nodes):.1f}%)"
+            ),
+            (
+                f"- NetworkUnavailable: {network_unavailable} nodes "
+                f"({percentage(network_unavailable, total_nodes):.1f}%)"
+            ),
+            "",
+            "Capacity:",
+            f"- CPU usage: {metric(report.cpu_usage_percent)}",
+            f"- Memory usage: {metric(report.memory_usage_percent)}",
+            (
+                f"- Metrics coverage: {report.metrics_nodes}/{total_nodes} "
+                "nodes"
+            ),
+            (
+                f"- Pod capacity: {report.active_pods}/"
+                f"{report.pod_capacity} active pods "
+                f"({percentage(report.active_pods, report.pod_capacity):.1f}%)"
+            ),
+            "",
+            "Scheduling impact:",
+            (
+                "- Unschedulable workflow pods: "
+                f"{report.unschedulable_workflow_pods}"
+            ),
+        ]
+
+        for reason, reason_count in sorted(
+            report.scheduling_reasons.items()
+        ):
+            lines.append(
+                f"- {reason}: {reason_count} pods "
+                f"({percentage(reason_count, report.unschedulable_workflow_pods):.1f}%)"
+            )
+
+        lines.extend(
+            [
+                "",
+                "Recommended action:",
+                (
+                    "Review node conditions and scheduling capacity before "
+                    "submitting more workflows."
+                    if degraded
+                    else "No node-pressure intervention is currently needed."
+                ),
+            ]
+        )
+        return "\n".join(lines)
 
     def _load_config(self, config_path: str) -> dict[str, Any]:
         path = Path(config_path)
@@ -189,11 +347,111 @@ class ClusterHealthAgent(BaseAgent):
         with path.open("r", encoding="utf-8") as file:
             return yaml.safe_load(file) or {}
 
-    def _is_infrastructure_pod(self, pod: PodStatus) -> bool:
-        return any(
-            pod.name.startswith(prefix)
-            for prefix in self.INFRASTRUCTURE.values()
+    @staticmethod
+    def _is_workflow_pod(pod: PodStatus) -> bool:
+        return bool(pod.workflow_name or pod.pipeline_step)
+
+    def _workflow_pods(
+        self,
+        pods: list[PodStatus],
+    ) -> list[PodStatus]:
+        return [pod for pod in pods if self._is_workflow_pod(pod)]
+
+    @staticmethod
+    def _workflow_name(pod: PodStatus) -> str:
+        return pod.workflow_name or "unassigned-workflow"
+
+    def _workflow_groups(
+        self,
+        pods: list[PodStatus],
+    ) -> list[tuple[str, list[PodStatus]]]:
+        grouped: dict[str, list[PodStatus]] = {}
+
+        for pod in self._workflow_pods(pods):
+            grouped.setdefault(
+                self._workflow_name(pod),
+                [],
+            ).append(pod)
+
+        phase_priority = {
+            "Failed": 0,
+            "Unknown": 1,
+            "Pending": 2,
+            "Running": 3,
+            "Succeeded": 4,
+        }
+
+        for workflow_pods in grouped.values():
+            workflow_pods.sort(
+                key=lambda pod: (
+                    phase_priority.get(pod.phase, 5),
+                    pod.name,
+                )
+            )
+
+        return sorted(
+            grouped.items(),
+            key=lambda item: (
+                min(
+                    phase_priority.get(pod.phase, 5)
+                    for pod in item[1]
+                ),
+                item[0],
+            ),
         )
+
+    def _batch_groups(
+        self,
+        pods: list[PodStatus],
+    ) -> list[tuple[str, list[PodStatus]]]:
+        grouped: dict[str, list[PodStatus]] = {}
+
+        for _, workflow_pods in self._workflow_groups(pods):
+            batch_ids = sorted(
+                {pod.batch_id for pod in workflow_pods if pod.batch_id}
+            )
+            batch_id = batch_ids[0] if batch_ids else "unlabeled"
+            grouped.setdefault(batch_id, []).extend(workflow_pods)
+
+        return sorted(grouped.items())
+
+    @staticmethod
+    def _workflow_state(pods: list[PodStatus]) -> str:
+        phases = {pod.phase or "Unknown" for pod in pods}
+
+        if phases & {"Failed", "Unknown"}:
+            return "Failed"
+        if "Running" in phases:
+            return "Running"
+        if "Pending" in phases:
+            return "Pending"
+        if phases == {"Succeeded"}:
+            return "Succeeded"
+        return "Unknown"
+
+    def _format_workflow_state_section(
+        self,
+        pods: list[PodStatus],
+    ) -> list[str]:
+        states: dict[str, int] = {}
+        groups = self._workflow_groups(pods)
+
+        for _, workflow_pods in groups:
+            state = self._workflow_state(workflow_pods)
+            states[state] = states.get(state, 0) + 1
+
+        total = len(groups)
+        if not total:
+            return ["- No workflows found."]
+
+        return [
+            (
+                f"- {state}: {count} "
+                f"{'workflow' if count == 1 else 'workflows'} "
+                f"({count / total * 100:.1f}% of workflows)"
+            )
+            for state, count in sorted(states.items())
+        ]
 
     def _format_pipeline_section(
         self,
@@ -209,7 +467,7 @@ class ClusterHealthAgent(BaseAgent):
         return [
             (
                 f"- {step}: {count} {'pod' if count == 1 else 'pods'} "
-                f"({count / total_pods * 100:.1f}% of active pipeline pods)"
+                f"({count / total_pods * 100:.1f}% of active workflow pods)"
             )
             for step, count in sorted(pods_by_step.items())
         ]
@@ -230,7 +488,7 @@ class ClusterHealthAgent(BaseAgent):
         return [
             (
                 f"- {phase}: {count} {'pod' if count == 1 else 'pods'} "
-                f"({count / total_pods * 100:.1f}% of all pods)"
+                f"({count / total_pods * 100:.1f}% of workflow pods)"
             )
             for phase, count in sorted(pods_by_phase.items())
         ]
@@ -241,24 +499,83 @@ class ClusterHealthAgent(BaseAgent):
     ) -> list[PodStatus]:
         return [
             pod
-            for pod in pods
+            for pod in self._workflow_pods(pods)
             if pod.phase == "Running"
             and pod.pipeline_step
-            and not self._is_infrastructure_pod(pod)
         ]
+
+    def _format_batch_sections(
+        self,
+        pods: list[PodStatus],
+    ) -> list[str]:
+        groups = self._batch_groups(pods)
+
+        if not groups:
+            return ["", "- No Argo workflow pods found."]
+
+        lines: list[str] = []
+
+        for batch_id, batch_pods in groups[: self.max_batches]:
+            workflow_count = len(self._workflow_groups(batch_pods))
+            sample_count = len(
+                {pod.sample_id for pod in batch_pods if pod.sample_id}
+            )
+            lines.extend(
+                [
+                    "",
+                    f"Batch: {batch_id}",
+                    f"Workflows: {workflow_count}",
+                    f"Samples represented: {sample_count}",
+                    f"Workflow pods: {len(batch_pods)}",
+                    "Workflow states:",
+                    *self._format_workflow_state_section(batch_pods),
+                ]
+            )
+
+            lines.extend(
+                [
+                    "Pod phases:",
+                    *self._format_pod_phase_section(batch_pods),
+                    "Current steps:",
+                ]
+            )
+
+            running_pods = self._running_pipeline_pods(batch_pods)
+
+            if running_pods:
+                lines.extend(self._format_pipeline_section(running_pods))
+                lines.extend(
+                    self._format_runtime_statistics_section(running_pods)
+                )
+            else:
+                lines.append("- No running pipeline steps.")
+
+        hidden_batches = len(groups) - self.max_batches
+        if hidden_batches > 0:
+            lines.extend(
+                ["", f"... {hidden_batches} more batches not listed"]
+            )
+
+        return lines
 
     def _format_pod_status_report(
         self,
         pods: list[PodStatus],
     ) -> str:
+        workflow_pods = self._workflow_pods(pods)
+        groups = self._workflow_groups(workflow_pods)
+        batches = self._batch_groups(workflow_pods)
+        samples = {pod.sample_id for pod in workflow_pods if pod.sample_id}
+
         return "\n".join(
             [
-                "Kubernetes Pod Status Report",
+                "Workflow Pod Status Report",
                 "",
-                f"Total pods: {len(pods)}",
-                "",
-                "Pod phases:",
-                *self._format_pod_phase_section(pods),
+                f"Batches represented: {len(batches)}",
+                f"Workflows observed: {len(groups)}",
+                f"Samples represented: {len(samples)}",
+                f"Total workflow pods: {len(workflow_pods)}",
+                *self._format_batch_sections(workflow_pods),
                 "",
                 (
                     "Possible Kubernetes phases: Pending, Running, Succeeded, "
@@ -272,35 +589,69 @@ class ClusterHealthAgent(BaseAgent):
         pods: list[PodStatus],
     ) -> str:
         pipeline_pods = self._running_pipeline_pods(pods)
+        groups = self._workflow_groups(pipeline_pods)
+        batches = self._batch_groups(pipeline_pods)
         lines = [
-            "Current Pipeline Steps",
+            "Current Workflow Pipeline Steps",
             "",
+            f"Active batches: {len(batches)}",
+            f"Active workflows: {len(groups)}",
             f"Running labeled pipeline pods: {len(pipeline_pods)}",
-            "",
-            "Step distribution:",
         ]
-        if pipeline_pods:
-            lines.extend(self._format_pipeline_section(pipeline_pods))
-            lines.extend(
-                self._format_runtime_statistics_section(pipeline_pods)
-            )
-        else:
+
+        if not pipeline_pods:
             lines.append("- No active pipeline workflows.")
+            return "\n".join(lines)
+
+        for batch_id, batch_pods in batches[: self.max_batches]:
+            lines.extend(
+                [
+                    "",
+                    f"Batch: {batch_id}",
+                    (
+                        "Active workflows: "
+                        f"{len(self._workflow_groups(batch_pods))}"
+                    ),
+                    "Step distribution:",
+                    *self._format_pipeline_section(batch_pods),
+                    *self._format_runtime_statistics_section(batch_pods),
+                ]
+            )
+
         return "\n".join(lines)
 
     def _format_cost_eta_report(
         self,
         pods: list[PodStatus],
     ) -> str:
-        running_pods = [pod for pod in pods if pod.phase == "Running"]
-        pipeline_pods = self._running_pipeline_pods(pods)
-        return "\n".join(
-            [
-                "Cluster Cost and ETA",
-                *self._format_cost_section(running_pods),
-                *self._format_eta_section(pipeline_pods),
-            ]
-        )
+        running_pods = [
+            pod
+            for pod in self._workflow_pods(pods)
+            if pod.phase == "Running"
+        ]
+        groups = self._batch_groups(running_pods)
+        lines = ["Workflow Cost and ETA"]
+
+        if not groups:
+            lines.extend(["", "- No active workflow pods."])
+            return "\n".join(lines)
+
+        for batch_id, batch_pods in groups[: self.max_batches]:
+            pipeline_pods = self._running_pipeline_pods(batch_pods)
+            lines.extend(
+                [
+                    "",
+                    f"Batch: {batch_id}",
+                    (
+                        "Active workflows: "
+                        f"{len(self._workflow_groups(batch_pods))}"
+                    ),
+                    *self._format_cost_section(batch_pods),
+                    *self._format_eta_section(pipeline_pods),
+                ]
+            )
+
+        return "\n".join(lines)
 
     def _format_runtime_statistics_section(
         self,
@@ -333,15 +684,6 @@ class ClusterHealthAgent(BaseAgent):
                 method="inclusive",
             )
 
-        shortest = min(
-            runtime_pods,
-            key=lambda pod: float(pod.runtime_minutes or 0.0),
-        )
-        longest = max(
-            runtime_pods,
-            key=lambda pod: float(pod.runtime_minutes or 0.0),
-        )
-
         lines.extend(
             [
                 f"- Pods measured: {len(runtime_pods)}",
@@ -349,16 +691,8 @@ class ClusterHealthAgent(BaseAgent):
                 f"- Q1 (25th percentile): {q1:.1f} min",
                 f"- Median (Q2): {q2:.1f} min",
                 f"- Q3 (75th percentile): {q3:.1f} min",
-                (
-                    f"- Shortest-running pod: {shortest.name} "
-                    f"({shortest.pipeline_step}, "
-                    f"{float(shortest.runtime_minutes or 0.0):.1f} min)"
-                ),
-                (
-                    f"- Longest-running pod: {longest.name} "
-                    f"({longest.pipeline_step}, "
-                    f"{float(longest.runtime_minutes or 0.0):.1f} min)"
-                ),
+                f"- Minimum runtime: {runtimes[0]:.1f} min",
+                f"- Maximum runtime: {runtimes[-1]:.1f} min",
             ]
         )
 
@@ -442,121 +776,48 @@ class ClusterHealthAgent(BaseAgent):
 
         return lines
 
-    def _infrastructure_status(
-        self,
-        pods: list[PodStatus],
-        prefix: str,
-    ) -> tuple[str, bool]:
-        matches = [
-            pod
-            for pod in pods
-            if pod.name.startswith(prefix)
-        ]
-
-        running = [
-            pod
-            for pod in matches
-            if pod.phase == "Running"
-        ]
-
-        if running:
-            return "Running", True
-
-        if matches:
-            newest = min(
-                matches,
-                key=lambda pod: pod.runtime_minutes
-                if pod.runtime_minutes is not None
-                else float("inf"),
-            )
-            return newest.phase, False
-
-        return "Not found", False
-
     def format_overall_health(
         self,
         pods: list[PodStatus],
         errors: list[str],
     ) -> str:
+        workflow_pods = self._workflow_pods(pods)
+        workflow_groups = self._workflow_groups(workflow_pods)
+        batch_groups = self._batch_groups(workflow_pods)
+        samples = {pod.sample_id for pod in workflow_pods if pod.sample_id}
         running_pods = [
-            pod for pod in pods
+            pod
+            for pod in workflow_pods
             if pod.phase == "Running"
         ]
-
-        pipeline_pods = self._running_pipeline_pods(pods)
-
-        other_running_pods = [
-            pod
-            for pod in running_pods
-            if not pod.pipeline_step
-            and not self._is_infrastructure_pod(pod)
-        ]
-
-        infrastructure_lines: list[str] = []
-        infrastructure_healthy = True
-
-        for display_name, prefix in self.INFRASTRUCTURE.items():
-            status, healthy = self._infrastructure_status(
-                pods,
-                prefix,
-            )
-            infrastructure_healthy = (
-                infrastructure_healthy and healthy
-            )
-            infrastructure_lines.append(
-                f"- {display_name}: {status}"
-            )
-
         overall_status = (
             "Healthy"
             if (
-                infrastructure_healthy
-                and not errors
+                not errors
                 and not any(
                     pod.phase in {"Failed", "Unknown"}
-                    for pod in pods
+                    for pod in workflow_pods
                 )
             )
             else "Degraded"
         )
 
         lines = [
-            "Cluster Health Report",
+            "Workflow Health Report",
             "",
             f"Overall status: {overall_status}",
-            f"Total pods: {len(pods)}",
-            "",
-            "Pod phases:",
-            *self._format_pod_phase_section(pods),
-            "",
-            "Infrastructure:",
-            *infrastructure_lines,
-            "",
-            "Active pipeline steps:",
+            f"Batches represented: {len(batch_groups)}",
+            f"Workflows observed: {len(workflow_groups)}",
+            f"Samples represented: {len(samples)}",
+            f"Total workflow pods: {len(workflow_pods)}",
+            *self._format_batch_sections(workflow_pods),
         ]
-
-        if pipeline_pods:
-            lines.extend(self._format_pipeline_section(pipeline_pods))
-        else:
-            lines.append("- No active pipeline workflows.")
-
-        lines.extend(
-            self._format_runtime_statistics_section(pipeline_pods)
-        )
-
-        if other_running_pods:
-            lines.extend(
-                [
-                    "",
-                    f"Other active pods: {len(other_running_pods)}",
-                ]
-            )
 
         lines.extend(
             [
                 "",
                 (
-                    f"Recent issues "
+                    f"Recent workflow pod issues "
                     f"(last {self.health_tool.recent_error_minutes} min):"
                 ),
             ]
@@ -567,8 +828,15 @@ class ClusterHealthAgent(BaseAgent):
         else:
             lines.append("- None.")
 
-        lines.extend(self._format_cost_section(running_pods))
-        lines.extend(self._format_eta_section(pipeline_pods))
+        if running_pods:
+            lines.extend(
+                [
+                    "",
+                    *self._format_cost_eta_report(
+                        workflow_pods
+                    ).splitlines(),
+                ]
+            )
 
         return "\n".join(lines)
 
@@ -584,10 +852,13 @@ class ClusterHealthAgent(BaseAgent):
     @staticmethod
     def format_analyzed_errors(errors: list[str]) -> str:
         if not errors:
-            return "Analyzed Pod Errors\n\nNo recent pod errors found."
+            return (
+                "Analyzed Workflow Pod Errors\n\n"
+                "No recent workflow pod errors found."
+            )
 
         lines = [
-            "Analyzed Pod Errors",
+            "Analyzed Workflow Pod Errors",
             "",
             f"Findings: {len(errors)}",
         ]
@@ -612,9 +883,10 @@ class ClusterHealthAgent(BaseAgent):
         return (
             "Cluster Health Agent\n\n"
             "Supported read-only requests:\n"
-            "- overall cluster health\n"
-            "- pod status counts and percentages\n"
-            "- currently running pipeline-step counts and percentages\n"
-            "- analyzed recent pod errors\n"
-            "- configured pod cost and ETA"
+            "- workflow health aggregated by batch\n"
+            "- workflow and pod status counts and percentages\n"
+            "- running pipeline steps per batch\n"
+            "- analyzed workflow pod errors\n"
+            "- configured workflow pod cost and ETA"
+            "\n- Kubernetes worker-node pressure and scheduling capacity"
         )

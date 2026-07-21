@@ -25,6 +25,10 @@ def build_workflow(plan: dict, *, namespace: str, image: str) -> dict:
             tasks.append(task)
             templates.append({
                 "name": task_name,
+                "retryStrategy": {
+                    "limit": "5",
+                    "retryPolicy": "OnError",
+                },
                 "metadata": {"labels": {
                     "pipeline_step": step_name,
                     "bioops.dev/stage": str(step["stage"]),

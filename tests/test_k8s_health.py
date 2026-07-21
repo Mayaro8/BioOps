@@ -138,7 +138,12 @@ def test_normal_container_creating_state_is_not_an_error(monkeypatch) -> None:
         state=SimpleNamespace(waiting=waiting, terminated=None),
     )
     pending_pod = SimpleNamespace(
-        metadata=SimpleNamespace(name="pipeline-test"),
+        metadata=SimpleNamespace(
+            name="pipeline-test",
+            labels={
+                "workflows.argoproj.io/workflow": "workflow-test",
+            },
+        ),
         status=SimpleNamespace(
             phase="Pending",
             start_time=None,
@@ -180,7 +185,12 @@ def test_image_pull_backoff_is_reported(monkeypatch) -> None:
         state=SimpleNamespace(waiting=waiting, terminated=None),
     )
     pending_pod = SimpleNamespace(
-        metadata=SimpleNamespace(name="pipeline-test"),
+        metadata=SimpleNamespace(
+            name="pipeline-test",
+            labels={
+                "workflows.argoproj.io/workflow": "workflow-test",
+            },
+        ),
         status=SimpleNamespace(
             phase="Pending",
             start_time=None,
@@ -213,3 +223,139 @@ def test_image_pull_backoff_is_reported(monkeypatch) -> None:
 
     assert len(errors) == 1
     assert "ImagePullBackOff" in errors[0]
+
+
+def test_get_pods_captures_argo_workflow_labels(monkeypatch) -> None:
+    pod = SimpleNamespace(
+        metadata=SimpleNamespace(
+            name="workflow-test-fastqc",
+            namespace="bioops-dev",
+            labels={
+                "workflows.argoproj.io/workflow": "workflow-test",
+                "bioops.dev/batch-id": "batch-1",
+                "bioops.dev/sample-id": "sample-1",
+                "pipeline_step": "fastqc",
+            },
+        ),
+        spec=SimpleNamespace(node_name="worker-1"),
+        status=SimpleNamespace(
+            phase="Running",
+            start_time=None,
+        ),
+    )
+
+    class FakeCoreApi:
+        def list_namespaced_pod(self, **_kwargs):
+            return SimpleNamespace(items=[pod])
+
+    monkeypatch.setattr(
+        k8s_health.config,
+        "load_incluster_config",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        k8s_health.client,
+        "CoreV1Api",
+        FakeCoreApi,
+    )
+
+    result = K8sHealthTool(namespace="bioops-dev").get_pods()
+
+    assert len(result) == 1
+    assert result[0].workflow_name == "workflow-test"
+    assert result[0].batch_id == "batch-1"
+    assert result[0].sample_id == "sample-1"
+    assert result[0].pipeline_step == "fastqc"
+
+
+def test_get_node_pressure_report_aggregates_metrics_and_scheduling(
+    monkeypatch,
+) -> None:
+    def condition(kind: str, status: str = "True"):
+        return SimpleNamespace(type=kind, status=status)
+
+    nodes = [
+        SimpleNamespace(
+            metadata=SimpleNamespace(name="worker-1"),
+            status=SimpleNamespace(
+                conditions=[condition("Ready"), condition("MemoryPressure")],
+                allocatable={"cpu": "4", "memory": "8Gi", "pods": "110"},
+            ),
+        ),
+        SimpleNamespace(
+            metadata=SimpleNamespace(name="worker-2"),
+            status=SimpleNamespace(
+                conditions=[condition("Ready", "False")],
+                allocatable={"cpu": "4", "memory": "8Gi", "pods": "110"},
+            ),
+        ),
+    ]
+    pending = SimpleNamespace(
+        metadata=SimpleNamespace(
+            name="workflow-pending",
+            namespace="bioops-dev",
+            labels={"workflows.argoproj.io/workflow": "workflow-a"},
+        ),
+        spec=SimpleNamespace(node_name=None),
+        status=SimpleNamespace(
+            phase="Pending",
+            conditions=[
+                SimpleNamespace(
+                    type="PodScheduled",
+                    status="False",
+                    reason="Unschedulable",
+                    message="0/2 nodes: 2 Insufficient memory.",
+                )
+            ],
+        ),
+    )
+    running = SimpleNamespace(
+        metadata=SimpleNamespace(
+            name="running", namespace="other", labels={}
+        ),
+        spec=SimpleNamespace(node_name="worker-1"),
+        status=SimpleNamespace(phase="Running", conditions=[]),
+    )
+
+    class FakeCoreApi:
+        def list_node(self, **_kwargs):
+            return SimpleNamespace(items=nodes)
+
+        def list_pod_for_all_namespaces(self, **_kwargs):
+            return SimpleNamespace(items=[pending, running])
+
+    class FakeMetricsApi:
+        def list_cluster_custom_object(self, **_kwargs):
+            return {
+                "items": [
+                    {
+                        "metadata": {"name": "worker-1"},
+                        "usage": {"cpu": "2", "memory": "4Gi"},
+                    },
+                    {
+                        "metadata": {"name": "worker-2"},
+                        "usage": {"cpu": "1", "memory": "2Gi"},
+                    },
+                ]
+            }
+
+    monkeypatch.setattr(
+        k8s_health.config, "load_incluster_config", lambda: None
+    )
+    monkeypatch.setattr(k8s_health.client, "CoreV1Api", FakeCoreApi)
+    monkeypatch.setattr(
+        k8s_health.client, "CustomObjectsApi", FakeMetricsApi
+    )
+
+    report = K8sHealthTool(namespace="bioops-dev").get_node_pressure_report()
+
+    assert len(report.nodes) == 2
+    assert report.nodes[0].memory_pressure is True
+    assert report.nodes[1].ready is False
+    assert report.active_pods == 2
+    assert report.pod_capacity == 220
+    assert report.cpu_usage_percent == 37.5
+    assert report.memory_usage_percent == 37.5
+    assert report.metrics_nodes == 2
+    assert report.unschedulable_workflow_pods == 1
+    assert report.scheduling_reasons == {"Insufficient memory": 1}

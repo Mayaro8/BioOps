@@ -5,16 +5,17 @@ agents:
 
   knowledge:
     enabled: true
-    description: Answers questions about BioOps documentation, pipeline metadata, source code, inputs, outputs, and explanations.
+    description: Answers from indexed Yandex Wiki pages first, with bundled BioOps docs as fallback.
 
   cluster_health:
     enabled: true
-    description: Checks Kubernetes cluster health, pods, logs, unhealthy containers, running steps, cost, and ETA.
+    description: Reports Argo workflow and Kubernetes node health, including phases, pressure, scheduling, runtime, cost, and ETA.
     namespace: bioops
     request_timeout_seconds: 5
     log_tail_lines: 50
     recent_error_minutes: 60
     error_report_limit: 20
+    max_batches: 10
     cost:
       mode: local_free
       currency: rub
@@ -47,6 +48,7 @@ agents:
     pod_page_size: 200
     max_listed_items: 10
     d5_max_retries: 2
+    max_launch_targets: 20
     step_patterns:
       config-creator:
         - config-creator

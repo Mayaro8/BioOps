@@ -5,3 +5,4 @@ resources:
   - rbac.yaml
   - cronjob.yaml
   - error-cronjob.yaml
+  - init-retry-cronjob.yaml

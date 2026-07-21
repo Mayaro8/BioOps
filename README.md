@@ -21,8 +21,8 @@ FastAPI /chat
 LLM Router
    |
    +-- General Agent
-   +-- Knowledge Agent -------> Qdrant
-   +-- Cluster Health Agent --> Kubernetes API and Pod logs
+   +-- Knowledge Agent -------> Yandex Wiki index, then bundled docs index in Qdrant
+   +-- Cluster Health Agent --> Argo workflow Pods and Pod logs
    +-- Review Agent ----------> GitHub API or local repository
    +-- Submit Master Agent ---> Argo Workflow CRDs
    +-- Batch Status Agent ----> SQLite database on PVC
@@ -76,7 +76,9 @@ Handles greetings, unclear questions, and unsupported requests.
 
 ### Knowledge Agent
 
-Answers questions from indexed project documentation stored in Qdrant.
+Answers from indexed Yandex Wiki pages first. When Wiki has no relevant result
+or its collection is unavailable, it falls back to bundled project documentation
+stored in Qdrant.
 
 Example:
 
@@ -86,28 +88,28 @@ Explain the BioOps orchestrator.
 
 ### Cluster Health Agent
 
-Reads live Kubernetes data and reports:
+Reads live Kubernetes data for Argo workflow Pods and worker nodes and reports:
 
-- Pod phases;
+- batch-level workflow and Pod counts and percentages;
 - container readiness;
 - restarts;
-- recent errors;
-- active pipeline steps identified by `pipeline_step` labels;
-- runtime for active pipeline Pods;
-- ETA where configured;
-- cost where available.
+- recent workflow Pod errors;
+- active pipeline steps aggregated by batch;
+- Pod runtime, ETA, and configured cost aggregated by batch;
+- node readiness, pressure, resource usage, Pod capacity, and scheduling blockers.
 
 Example:
 
 ```text
-Check cluster health.
+Show workflow health and its Pods.
 ```
 
 The Cluster Health Agent uses a second LLM routing layer to choose a bounded
-read-only report. It separates BioOps infrastructure Pods from labeled pipeline
-Pods and reports pod phases and active steps as counts and percentages. A
-30-minute monitor sends analyzed Pod errors to the browser, and an hourly
-monitor sends the full health report. It never restarts Pods.
+read-only report. It excludes BioOps infrastructure Pods and groups Argo Pods
+using `workflows.argoproj.io/workflow`. A 30-minute monitor sends analyzed
+workflow Pod errors to the browser, and an hourly monitor sends the full
+workflow health report. Conversational reports are read-only; the separate init
+watchdog can delete a stuck initialization attempt under its five-retry policy.
 
 ### Review Agent
 
@@ -325,7 +327,8 @@ The main application Secret is:
 bioops-secrets
 ```
 
-It should contain the required Azure OpenAI and GitHub values.
+It should contain the required Azure OpenAI, GitHub, Yandex Wiki, and Yandex
+ID OAuth values.
 
 Example:
 
@@ -334,6 +337,18 @@ read -rsp "Azure OpenAI API key: " AZURE_OPENAI_API_KEY
 echo
 
 read -rsp "GitHub token: " GITHUB_TOKEN
+echo
+
+read -rsp "Yandex Wiki read-only OAuth token: " YANDEX_WIKI_TOKEN
+echo
+
+read -rp "Yandex OAuth client ID: " YANDEX_OAUTH_CLIENT_ID
+read -rsp "Yandex OAuth client secret: " YANDEX_OAUTH_CLIENT_SECRET
+echo
+
+BIOOPS_SESSION_SECRET="$(openssl rand -base64 48)"
+
+read -rsp "Developer access code (minimum 5 characters): " BIOOPS_LOCAL_ACCESS_CODE
 echo
 ```
 
@@ -356,6 +371,11 @@ kubectl -n bioops-dev create secret generic bioops-secrets \
   --from-literal=AZURE_OPENAI_CHAT_DEPLOYMENT="$AZURE_OPENAI_CHAT_DEPLOYMENT" \
   --from-literal=AZURE_OPENAI_EMBEDDING_DEPLOYMENT="$AZURE_OPENAI_EMBEDDING_DEPLOYMENT" \
   --from-literal=GITHUB_TOKEN="$GITHUB_TOKEN" \
+  --from-literal=YANDEX_WIKI_TOKEN="$YANDEX_WIKI_TOKEN" \
+  --from-literal=YANDEX_OAUTH_CLIENT_ID="$YANDEX_OAUTH_CLIENT_ID" \
+  --from-literal=YANDEX_OAUTH_CLIENT_SECRET="$YANDEX_OAUTH_CLIENT_SECRET" \
+  --from-literal=BIOOPS_SESSION_SECRET="$BIOOPS_SESSION_SECRET" \
+  --from-literal=BIOOPS_LOCAL_ACCESS_CODE="$BIOOPS_LOCAL_ACCESS_CODE" \
   --dry-run=client \
   -o yaml \
   | kubectl apply -f -
@@ -364,46 +384,48 @@ kubectl -n bioops-dev create secret generic bioops-secrets \
 Clear the shell variables:
 
 ```bash
-unset AZURE_OPENAI_API_KEY GITHUB_TOKEN
+unset AZURE_OPENAI_API_KEY GITHUB_TOKEN YANDEX_WIKI_TOKEN
+unset YANDEX_OAUTH_CLIENT_ID YANDEX_OAUTH_CLIENT_SECRET BIOOPS_SESSION_SECRET
+unset BIOOPS_LOCAL_ACCESS_CODE
 ```
 
 ---
 
-## 10. Browser Basic Auth
+## 10. Browser Yandex ID Login
 
-The browser authentication Secret is:
+Register a user-login application in the
+[Yandex OAuth console](https://oauth.yandex.com/) with email and basic profile
+access. Its exact production redirect URI must be:
 
 ```text
-bioops-edge-auth
+https://bioops.84-201-181-221.sslip.io/auth/yandex/callback
 ```
 
-Create it:
+The browser redirects to Yandex, exchanges the returned code on the server,
+reads `default_email`, and creates a BioOps session only when the normalized
+address ends exactly with `@genotek.ru`. Other addresses receive HTTP 403 with
+a clear access-denied message. User identities and hashed opaque sessions are
+stored in `/data/bioops_auth.sqlite3` on the existing PVC.
+
+The deployment also enables a separate developer-code form for environments
+where a Genotek Yandex account is unavailable. Set a strong value of at least
+five characters in the `BIOOPS_LOCAL_ACCESS_CODE` Secret field. It creates a
+fixed `BioOps Developer` identity and the same secure 12-hour session, without
+using an email provider. Five failed attempts from one client within five
+minutes temporarily block further attempts. Disable this path at any time with
+`BIOOPS_LOCAL_ACCESS_ENABLED=false`.
+
+For local HTTP development, configure:
 
 ```bash
-BIOOPS_USERNAME="bioops"
-
-read -rsp "Browser password: " BIOOPS_PASSWORD
-echo
-
-BIOOPS_PASSWORD_HASH="$(
-  docker run --rm caddy:2-alpine \
-  caddy hash-password \
-  --plaintext "$BIOOPS_PASSWORD"
-)"
+YANDEX_OAUTH_REDIRECT_URI=http://localhost:8000/auth/yandex/callback
+BIOOPS_COOKIE_SECURE=false
 ```
 
-```bash
-kubectl -n bioops-dev create secret generic bioops-edge-auth \
-  --from-literal=username="$BIOOPS_USERNAME" \
-  --from-literal=password-hash="$BIOOPS_PASSWORD_HASH" \
-  --dry-run=client \
-  -o yaml \
-  | kubectl apply -f -
-```
-
-```bash
-unset BIOOPS_PASSWORD BIOOPS_PASSWORD_HASH
-```
+Keep `BIOOPS_COOKIE_SECURE=true` in Kubernetes. OAuth state is signed and
+time-limited, and browser sessions use `HttpOnly`, `Secure`, `SameSite=Lax`
+cookies. Caddy now provides TLS and reverse proxying only; the old shared
+basic-auth password is no longer used.
 
 ---
 
@@ -502,6 +524,28 @@ bioops-submit-master-local
 
 ## 14. Knowledge ingestion workflow
 
+Configure the Wiki subtree in `deploy/k8s/config/runtime.env` before applying
+the stack:
+
+```text
+YANDEX_WIKI_ENABLED=true
+YANDEX_WIKI_ROOT_SLUG=bioops
+YANDEX_WIKI_ORG_ID=YOUR_ORGANIZATION_ID
+YANDEX_WIKI_ORG_HEADER=X-Org-Id
+YANDEX_WIKI_AUTH_SCHEME=OAuth
+```
+
+Use `X-Cloud-Org-Id` with `Bearer` authentication for a Yandex Cloud
+organization using a user IAM token. Yandex Wiki does not accept service-account
+authorization. For Yandex 360, use a user OAuth token with the read-only
+`wiki:read` permission. The ingestion workflow reads the configured root page
+and all accessible descendants into
+`bioops_knowledge_wiki`; bundled `docs/` files remain in `bioops_knowledge`.
+
+At query time the Knowledge Agent searches the Wiki collection first. Results
+below `YANDEX_WIKI_MIN_SCORE` are treated as no match and trigger the bundled
+docs fallback.
+
 Submit the knowledge-ingestion workflow:
 
 ```bash
@@ -522,7 +566,9 @@ Success criteria:
 
 ```text
 Qdrant is reachable
-Knowledge source files are found
+Yandex Wiki pages are fetched when enabled
+Bundled knowledge source files are found
+Wiki and bundled docs collections are updated
 Ingestion completes successfully
 Workflow phase is Succeeded
 Container exit code is 0
@@ -583,6 +629,18 @@ sample and include counts, percentages, current-step distribution, and runtime
 statistics. D5 first performs a read-only retry assessment and creates a new
 sample Workflow only after `CONFIRM RETRY <workflow-name>` is sent exactly.
 
+Submit Master can also assess multiple batch launches across multiple kube
+contexts in one request. Each target binds `batch_id`, `input_prefix`, `stage`,
+`cluster_context`, and an optional `namespace`. It returns one exact
+`CONFIRM MOCK MULTI-LAUNCH [...]` command for the complete target list, then
+submits every target sequentially and reports successes and failures together.
+
+When BioOps runs in Kubernetes, external contexts are read from the optional
+`bioops-cluster-kubeconfig` Secret, whose `config` key contains a kubeconfig.
+Every target cluster must contain the configured WorkflowTemplate, namespace,
+input data, and credentials authorized to create Argo Workflows. The current
+in-cluster target does not require this Secret.
+
 ---
 
 ## 16. Cluster Health CronJob
@@ -592,6 +650,7 @@ The Cluster Health schedulers are defined at:
 ```text
 deploy/k8s/cluster-health/cronjob.yaml
 deploy/k8s/cluster-health/error-cronjob.yaml
+deploy/k8s/cluster-health/init-retry-cronjob.yaml
 ```
 
 They run:
@@ -599,6 +658,7 @@ They run:
 ```text
 python -m bioops.jobs.cluster_health_monitor --mode status
 python -m bioops.jobs.cluster_health_monitor --mode errors
+python -m bioops.jobs.init_retry_watchdog --threshold-minutes 30
 ```
 
 Check the CronJob:
@@ -607,6 +667,12 @@ Check the CronJob:
 kubectl -n bioops-dev get \
   cronjob bioops-cluster-health-monitor bioops-cluster-error-monitor
 ```
+
+The init retry watchdog runs every minute. When an Argo Pod has an unfinished
+init container for strictly more than 30 minutes, it deletes that stuck Pod
+attempt immediately without user confirmation. Argo recreates the attempt with
+`retryPolicy: OnError` and a maximum of five retries. This watchdog does not
+replace the separate D5 failed-sample retry assessment.
 
 Run it manually:
 
@@ -628,9 +694,10 @@ Current limitations:
 
 ```text
 Reports are written to Job logs and sent to the browser notification inbox.
-The full health report runs hourly, including while the pipeline is idle.
-Analyzed recent-error alerts run every 30 minutes and stay quiet when healthy.
-Both CronJobs are suspended until the new image is built, pushed, and validated.
+The workflow health report runs hourly, including while the pipeline is idle.
+Analyzed workflow Pod error alerts run every 30 minutes and stay quiet when healthy.
+The two notification CronJobs are suspended until the new image is validated.
+The init retry watchdog is enabled because it is an automatic recovery control.
 An in-cluster CronJob cannot detect that its own cluster is powered off.
 ```
 
@@ -742,7 +809,11 @@ Review the Mayaro8/BioOps repository and identify the three most important engin
 ### Cluster Health Agent
 
 ```text
-Check cluster health and show the active pipeline steps.
+Show each active workflow, its Pods, and current pipeline steps.
+```
+
+```text
+Show Kubernetes node pressure and scheduling capacity.
 ```
 
 ### Submit Master Agent

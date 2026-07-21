@@ -1,17 +1,25 @@
 from __future__ import annotations
 
 import csv
+import hmac
+import html
 import io
 import json
 import logging
 import os
 from datetime import datetime, timedelta, timezone
 from typing import Any
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlencode
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import (
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+)
 from pydantic import BaseModel
+from requests import RequestException
 
 from bioops.api.batch_status_page import BATCH_STATUS_PAGE
 from bioops.graph_orchestrator import run_graph
@@ -19,6 +27,15 @@ from bioops.tools.batch_status_rows import SHEET_COLUMNS
 from bioops.tools.batch_status_store import BatchStatusStore
 from bioops.tools.bitrix_sender import BitrixSender
 from bioops.tools.notification_store import NotificationStore
+from bioops.api.yandex_auth import (
+    AuthStore,
+    YandexAuthSettings,
+    YandexOAuthClient,
+    create_state_token,
+    email_is_allowed,
+    safe_return_to,
+    verify_state_token,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -32,6 +49,72 @@ bitrix_sender = BitrixSender()
 
 _notification_store: NotificationStore | None = None
 _batch_status_store: BatchStatusStore | None = None
+_auth_store: AuthStore | None = None
+_yandex_oauth_client: YandexOAuthClient | None = None
+
+
+def get_auth_settings() -> YandexAuthSettings:
+    return YandexAuthSettings.from_env()
+
+
+def get_auth_store() -> AuthStore:
+    global _auth_store
+
+    if _auth_store is None:
+        _auth_store = AuthStore(
+            os.getenv(
+                "BIOOPS_AUTH_DB_PATH",
+                "/data/bioops_auth.sqlite3",
+            )
+        )
+    return _auth_store
+
+
+def get_yandex_oauth_client() -> YandexOAuthClient:
+    global _yandex_oauth_client
+
+    settings = get_auth_settings()
+    if _yandex_oauth_client is None:
+        _yandex_oauth_client = YandexOAuthClient(settings)
+    return _yandex_oauth_client
+
+
+PUBLIC_PATHS = {
+    "/health",
+    "/login",
+    "/auth/yandex/login",
+    "/auth/yandex/callback",
+    "/auth/local",
+    "/internal/alerts",
+    "/bitrix/message",
+}
+HTML_PATHS = {"/", "/batches"}
+
+
+@app.middleware("http")
+async def require_browser_session(request: Request, call_next):
+    settings = get_auth_settings()
+    if (
+        not settings.enabled
+        or request.method == "OPTIONS"
+        or request.url.path in PUBLIC_PATHS
+    ):
+        return await call_next(request)
+
+    token = request.cookies.get(settings.session_cookie_name, "")
+    user = get_auth_store().get_session_user(token)
+    if user is not None:
+        request.state.user = user
+        return await call_next(request)
+
+    if request.url.path in HTML_PATHS:
+        query = urlencode({"next": request.url.path})
+        return RedirectResponse(f"/login?{query}", status_code=303)
+
+    return JSONResponse(
+        status_code=401,
+        content={"detail": "Sign in with an authorized Yandex account."},
+    )
 
 
 def get_notification_store() -> NotificationStore:
@@ -78,6 +161,204 @@ class ChatResponse(BaseModel):
     answer: str
 
 
+AUTH_ERROR_MESSAGES = {
+    "oauth_denied": "Yandex authorization was cancelled or denied.",
+    "oauth_failed": "Yandex sign-in could not be completed. Please try again.",
+    "invalid_state": "The sign-in request expired or was invalid. Please try again.",
+    "invalid_local_code": "The developer access code is invalid.",
+}
+
+_local_login_failures: dict[str, list[datetime]] = {}
+
+
+def login_page_html(error: str = "", return_to: str = "/") -> str:
+    message = AUTH_ERROR_MESSAGES.get(error, error)
+    error_html = (
+        f'<p class="auth-error" role="alert">{html.escape(message)}</p>'
+        if message
+        else ""
+    )
+    login_url = "/auth/yandex/login?" + urlencode(
+        {"next": safe_return_to(return_to)}
+    )
+    settings = get_auth_settings()
+    local_access_html = ""
+    if settings.local_access_enabled:
+        local_access_html = f"""
+      <div class="auth-divider"><span>or</span></div>
+      <form class="local-access" method="post" action="/auth/local">
+        <input
+          type="hidden"
+          name="return_to"
+          value="{html.escape(safe_return_to(return_to))}"
+        >
+        <label for="local-access-code">Developer access code</label>
+        <div class="local-access-row">
+          <input
+            id="local-access-code"
+            name="access_code"
+            type="password"
+            autocomplete="current-password"
+            required
+          >
+          <button type="submit">Sign in</button>
+        </div>
+      </form>
+"""
+    return f"""
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in | BioOps</title>
+  <style>
+    :root {{
+      color-scheme: light;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system,
+        BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f4f6f8;
+      color: #20242b;
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{ margin: 0; }}
+    main {{
+      display: grid;
+      min-height: 100vh;
+      place-items: center;
+      padding: 24px;
+    }}
+    .auth-panel {{
+      width: min(420px, 100%);
+      padding: 32px;
+      border: 1px solid #d9dde3;
+      border-radius: 8px;
+      background: #ffffff;
+      box-shadow: 0 10px 32px rgba(23, 32, 52, 0.08);
+    }}
+    .brand {{
+      margin: 0 0 28px;
+      color: #172034;
+      font-size: 1rem;
+      font-weight: 760;
+    }}
+    h1 {{
+      margin: 0;
+      color: #172034;
+      font-size: 1.75rem;
+      letter-spacing: 0;
+    }}
+    .subtitle {{
+      margin: 10px 0 24px;
+      color: #626b78;
+      line-height: 1.5;
+    }}
+    .yandex-button {{
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 46px;
+      width: 100%;
+      border: 1px solid #cbd0d8;
+      border-radius: 7px;
+      background: #ffffff;
+      color: #20242b;
+      font-weight: 700;
+      text-decoration: none;
+    }}
+    .yandex-mark {{
+      display: grid;
+      width: 26px;
+      height: 26px;
+      margin-right: 10px;
+      border-radius: 50%;
+      background: #fc3f1d;
+      color: #ffffff;
+      font-weight: 800;
+      place-items: center;
+    }}
+    .auth-error {{
+      margin: 0 0 18px;
+      padding: 11px 12px;
+      border-left: 4px solid #c73b3f;
+      background: #fff1f1;
+      color: #8a2529;
+      line-height: 1.4;
+    }}
+    .auth-divider {{
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 22px 0;
+      color: #7b8491;
+      font-size: 0.8rem;
+    }}
+    .auth-divider::before,
+    .auth-divider::after {{
+      height: 1px;
+      flex: 1;
+      background: #e1e4e8;
+      content: "";
+    }}
+    .local-access label {{
+      display: block;
+      margin-bottom: 7px;
+      color: #4e5764;
+      font-size: 0.84rem;
+      font-weight: 650;
+    }}
+    .local-access-row {{
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+    }}
+    .local-access input[type="password"] {{
+      min-width: 0;
+      min-height: 42px;
+      padding: 0 11px;
+      border: 1px solid #cbd0d8;
+      border-radius: 6px;
+      font: inherit;
+    }}
+    .local-access button {{
+      min-height: 42px;
+      padding: 0 15px;
+      border: 0;
+      border-radius: 6px;
+      background: #264f8f;
+      color: #ffffff;
+      cursor: pointer;
+      font-weight: 700;
+    }}
+    .access-note {{
+      margin: 18px 0 0;
+      color: #707987;
+      font-size: 0.85rem;
+    }}
+  </style>
+</head>
+<body>
+  <main>
+    <section class="auth-panel" aria-labelledby="sign-in-title">
+      <p class="brand">BioOps</p>
+      <h1 id="sign-in-title">Sign in</h1>
+      <p class="subtitle">Use your company Yandex ID to continue.</p>
+      {error_html}
+      <a class="yandex-button" href="{html.escape(login_url)}">
+        <span class="yandex-mark" aria-hidden="true">Y</span>
+        Sign in with Yandex
+      </a>
+      {local_access_html}
+      <p class="access-note">
+        Company access is restricted to @genotek.ru accounts.
+      </p>
+    </section>
+  </main>
+</body>
+</html>
+"""
+
+
 CHAT_PAGE = """
 <!doctype html>
 <html lang="en">
@@ -122,6 +403,7 @@ CHAT_PAGE = """
 
     .chat-nav-links {
       display: flex;
+      align-items: center;
       gap: 18px;
     }
 
@@ -134,6 +416,19 @@ CHAT_PAGE = """
 
     .chat-nav a[aria-current="page"] {
       color: #93c5fd;
+    }
+
+    #logout-form {
+      display: inline;
+      margin: 0;
+    }
+
+    #logout-form button {
+      min-width: auto;
+      padding: 0;
+      background: transparent;
+      color: #cbd5e1;
+      font-size: 0.9rem;
     }
 
     .subtitle {
@@ -287,11 +582,14 @@ CHAT_PAGE = """
       <span class="chat-nav-links">
         <a href="/" aria-current="page">Chat</a>
         <a href="/batches">Batch status</a>
+        <form id="logout-form" method="post" action="/logout">
+          <button type="submit">Sign out</button>
+        </form>
       </span>
     </nav>
     <h1>BioOps Chat</h1>
     <p class="subtitle">
-      Ask about workflows, batches, cluster health, storage, documentation, or code review.
+      Ask about workflows, batches, workflow health, storage, documentation, or code review.
     </p>
 
     <section
@@ -665,6 +963,244 @@ def _prepare_batch_rows(
         ]
 
     return filtered, summary
+
+
+@app.get("/login", response_class=HTMLResponse)
+def login_page(
+    request: Request,
+    error: str = "",
+    next: str = "/",
+) -> Response:
+    settings = get_auth_settings()
+    token = request.cookies.get(settings.session_cookie_name, "")
+    if settings.enabled and get_auth_store().get_session_user(token):
+        return RedirectResponse(safe_return_to(next), status_code=303)
+    return HTMLResponse(login_page_html(error, next))
+
+
+@app.get("/auth/yandex/login")
+def yandex_login(next: str = "/") -> Response:
+    settings = get_auth_settings()
+    try:
+        settings.require_oauth_configuration()
+    except RuntimeError:
+        logger.exception("Yandex OAuth configuration is incomplete.")
+        return HTMLResponse(
+            login_page_html(
+                "Yandex sign-in is not configured. Contact the BioOps administrator."
+            ),
+            status_code=503,
+        )
+
+    state = create_state_token(
+        secret=settings.session_secret,
+        return_to=safe_return_to(next),
+    )
+    response = RedirectResponse(
+        get_yandex_oauth_client().authorization_url(state),
+        status_code=303,
+    )
+    response.set_cookie(
+        settings.state_cookie_name,
+        state,
+        max_age=settings.state_ttl_minutes * 60,
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite="lax",
+        path="/auth/yandex/callback",
+    )
+    return response
+
+
+@app.post("/auth/local")
+async def local_access_login(request: Request) -> Response:
+    settings = get_auth_settings()
+    try:
+        settings.require_local_access_configuration()
+    except RuntimeError:
+        return HTMLResponse(
+            login_page_html(
+                "Developer access is not configured. Contact the BioOps administrator."
+            ),
+            status_code=503,
+        )
+
+    client_address = request.client.host if request.client else "unknown"
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(minutes=5)
+    failures = [
+        attempted_at
+        for attempted_at in _local_login_failures.get(client_address, [])
+        if attempted_at > cutoff
+    ]
+    _local_login_failures[client_address] = failures
+    if len(failures) >= 5:
+        return HTMLResponse(
+            login_page_html(
+                "Too many failed developer sign-in attempts. Try again later."
+            ),
+            status_code=429,
+        )
+
+    body = await request.body()
+    values = parse_qs(body.decode("utf-8"), keep_blank_values=True)
+    access_code = values.get("access_code", [""])[-1]
+    return_to = safe_return_to(values.get("return_to", ["/"])[-1])
+    if not hmac.compare_digest(access_code, settings.local_access_code):
+        failures.append(now)
+        _local_login_failures[client_address] = failures
+        return HTMLResponse(
+            login_page_html("invalid_local_code", return_to),
+            status_code=401,
+        )
+
+    _local_login_failures.pop(client_address, None)
+    user = get_auth_store().link_external_user(
+        provider="local",
+        provider_user_id="developer",
+        email="developer@bioops.local",
+        display_name="BioOps Developer",
+    )
+    session_token = get_auth_store().create_session(
+        user_id=int(user["id"]),
+        ttl_hours=settings.session_ttl_hours,
+    )
+    response = RedirectResponse(return_to, status_code=303)
+    response.set_cookie(
+        settings.session_cookie_name,
+        session_token,
+        max_age=settings.session_ttl_hours * 60 * 60,
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite="lax",
+        path="/",
+    )
+    return response
+
+
+@app.get("/auth/yandex/callback")
+def yandex_callback(
+    request: Request,
+    code: str = "",
+    state: str = "",
+    error: str = "",
+) -> Response:
+    settings = get_auth_settings()
+    try:
+        settings.require_oauth_configuration()
+    except RuntimeError:
+        return HTMLResponse(
+            login_page_html(
+                "Yandex sign-in is not configured. Contact the BioOps administrator."
+            ),
+            status_code=503,
+        )
+    if error:
+        return HTMLResponse(
+            login_page_html("oauth_denied"), status_code=400
+        )
+    if not code:
+        return HTMLResponse(
+            login_page_html("Yandex did not return an authorization code."),
+            status_code=400,
+        )
+
+    state_cookie = request.cookies.get(settings.state_cookie_name, "")
+    if not state or not state_cookie or not hmac.compare_digest(
+        state, state_cookie
+    ):
+        return HTMLResponse(
+            login_page_html("invalid_state"), status_code=400
+        )
+
+    try:
+        state_payload = verify_state_token(
+            state,
+            secret=settings.session_secret,
+            ttl_minutes=settings.state_ttl_minutes,
+        )
+        access_token = get_yandex_oauth_client().exchange_code(code)
+        profile = get_yandex_oauth_client().get_user_info(access_token)
+    except (ValueError, RuntimeError, RequestException):
+        logger.exception("Yandex OAuth callback failed.")
+        return HTMLResponse(
+            login_page_html("oauth_failed"), status_code=502
+        )
+
+    email = str(profile.get("default_email", "")).strip().casefold()
+    if not email_is_allowed(
+        email,
+        settings.allowed_domain,
+        settings.allowed_emails,
+    ):
+        response = HTMLResponse(
+            login_page_html(
+                "Access denied. BioOps is available only to "
+                f"@{settings.allowed_domain} accounts or explicitly "
+                "approved users."
+            ),
+            status_code=403,
+        )
+        response.delete_cookie(
+            settings.state_cookie_name,
+            path="/auth/yandex/callback",
+        )
+        return response
+
+    yandex_id = str(profile.get("id", "")).strip()
+    if not yandex_id:
+        return HTMLResponse(
+            login_page_html("Yandex did not return a stable user ID."),
+            status_code=502,
+        )
+
+    display_name = str(
+        profile.get("display_name")
+        or profile.get("real_name")
+        or email
+    ).strip()
+    user = get_auth_store().link_yandex_user(
+        yandex_id=yandex_id,
+        email=email,
+        display_name=display_name,
+    )
+    session_token = get_auth_store().create_session(
+        user_id=int(user["id"]),
+        ttl_hours=settings.session_ttl_hours,
+    )
+    response = RedirectResponse(
+        safe_return_to(str(state_payload.get("return_to", "/"))),
+        status_code=303,
+    )
+    response.set_cookie(
+        settings.session_cookie_name,
+        session_token,
+        max_age=settings.session_ttl_hours * 60 * 60,
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite="lax",
+        path="/",
+    )
+    response.delete_cookie(
+        settings.state_cookie_name,
+        path="/auth/yandex/callback",
+    )
+    return response
+
+
+@app.post("/logout")
+def logout(request: Request) -> Response:
+    settings = get_auth_settings()
+    token = request.cookies.get(settings.session_cookie_name, "")
+    get_auth_store().revoke_session(token)
+    response = RedirectResponse("/login", status_code=303)
+    response.delete_cookie(settings.session_cookie_name, path="/")
+    return response
+
+
+@app.get("/auth/me")
+def current_user(request: Request) -> dict[str, Any]:
+    return dict(request.state.user)
 
 
 @app.get("/", response_class=HTMLResponse)

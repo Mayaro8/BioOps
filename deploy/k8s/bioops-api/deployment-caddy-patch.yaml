@@ -16,16 +16,6 @@ spec:
           env:
             - name: BIOOPS_HOST
               value: bioops.84-201-181-221.sslip.io
-            - name: BIOOPS_USERNAME
-              valueFrom:
-                secretKeyRef:
-                  name: bioops-edge-auth
-                  key: username
-            - name: BIOOPS_PASSWORD_HASH
-              valueFrom:
-                secretKeyRef:
-                  name: bioops-edge-auth
-                  key: password-hash
           ports:
             - name: http
               containerPort: 80

@@ -52,6 +52,9 @@ spec:
                 name: bioops-config
             - secretRef:
                 name: bioops-secrets
+          env:
+            - name: KUBECONFIG
+              value: /etc/bioops/kubeconfig/config
           startupProbe:
             tcpSocket:
               port: http
@@ -88,6 +91,9 @@ spec:
               mountPath: /app/data/bucket_inventory.csv
               subPath: bucket_inventory.csv
               readOnly: true
+            - name: cluster-kubeconfig
+              mountPath: /etc/bioops/kubeconfig
+              readOnly: true
       volumes:
         - name: agents-config
           configMap:
@@ -98,3 +104,7 @@ spec:
         - name: bucket-inventory
           configMap:
             name: bioops-bucket-inventory
+        - name: cluster-kubeconfig
+          secret:
+            secretName: bioops-cluster-kubeconfig
+            optional: true

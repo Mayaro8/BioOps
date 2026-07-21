@@ -1,4 +1,5 @@
 from bioops.agents.knowledge_agent import KnowledgeAgent
+from bioops.rag.schemas import RetrievedChunk
 
 
 class FakeQueryRewriter:
@@ -26,14 +27,25 @@ class FakeEmbedder:
 
 
 class FakeStore:
-    def __init__(self):
+    def __init__(self, chunks=None):
         self.seen_vector = None
         self.seen_limit = None
+        self.chunks = chunks if chunks is not None else ["chunk-1"]
 
     def search(self, query_vector, limit: int):
         self.seen_vector = query_vector
         self.seen_limit = limit
-        return ["chunk-1"]
+        return self.chunks
+
+
+class ExplodingStore:
+    def search(self, query_vector, limit: int):
+        raise RuntimeError("wiki collection unavailable")
+
+
+class UnexpectedStore:
+    def search(self, query_vector, limit: int):
+        raise AssertionError("docs fallback should not run")
 
 
 class FakeChat:
@@ -60,6 +72,8 @@ def make_agent():
     )
     agent.embedder = FakeEmbedder()
     agent.store = FakeStore()
+    agent.wiki_store = None
+    agent.wiki_min_score = 0.35
     agent.chat = FakeChat()
     return agent
 
@@ -77,6 +91,56 @@ def test_knowledge_agent_uses_llm_rewritten_query_for_retrieval():
     assert agent.store.seen_vector == [0.1, 0.2, 0.3]
     assert agent.store.seen_limit == 5
     assert agent.chat.seen_question == "what does bam to gvcf output?"
+    assert agent.chat.seen_chunks == ["chunk-1"]
+
+
+def test_knowledge_agent_prefers_relevant_wiki_chunks():
+    agent = make_agent()
+    wiki_chunk = RetrievedChunk(
+        chunk_id="wiki:1",
+        text="Wiki pipeline instructions",
+        metadata={"source_kind": "yandex_wiki"},
+        score=0.88,
+    )
+    agent.wiki_store = FakeStore([wiki_chunk])
+    agent.store = UnexpectedStore()
+
+    result = agent.run("how does the pipeline work?")
+
+    assert result == "answer from retrieved chunks"
+    assert agent.chat.seen_chunks == [wiki_chunk]
+
+
+def test_knowledge_agent_falls_back_when_wiki_is_not_relevant():
+    agent = make_agent()
+    wiki_chunk = RetrievedChunk(
+        chunk_id="wiki:1",
+        text="Unrelated Wiki text",
+        metadata={"source_kind": "yandex_wiki"},
+        score=0.12,
+    )
+    docs_chunk = RetrievedChunk(
+        chunk_id="docs:1",
+        text="Bundled pipeline instructions",
+        metadata={"source_kind": "bundled_docs"},
+        score=0.72,
+    )
+    agent.wiki_store = FakeStore([wiki_chunk])
+    agent.store = FakeStore([docs_chunk])
+
+    result = agent.run("how does the pipeline work?")
+
+    assert result == "answer from retrieved chunks"
+    assert agent.chat.seen_chunks == [docs_chunk]
+
+
+def test_knowledge_agent_falls_back_when_wiki_search_fails():
+    agent = make_agent()
+    agent.wiki_store = ExplodingStore()
+
+    result = agent.run("how does the pipeline work?")
+
+    assert result == "answer from retrieved chunks"
     assert agent.chat.seen_chunks == ["chunk-1"]
 
 

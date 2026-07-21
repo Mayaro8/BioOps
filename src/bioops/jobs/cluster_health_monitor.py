@@ -27,7 +27,7 @@ def run_error_check(
 
     finding_word = "finding" if len(errors) == 1 else "findings"
     alerts.send_alert(
-        title=f"{len(errors)} recent Kubernetes pod error {finding_word}",
+        title=f"{len(errors)} recent workflow pod error {finding_word}",
         message=agent.format_analyzed_errors(errors),
         severity=_error_severity(errors),
     )
@@ -42,10 +42,14 @@ def run_hourly_health_check(
         limit=agent.error_report_limit,
     )
     report = agent.format_overall_health(pods, errors)
-    status = "Degraded" if "Overall status: Degraded" in report else "Healthy"
+    status = (
+        "Degraded"
+        if "Overall status: Degraded" in report
+        else "Healthy"
+    )
 
     alerts.send_status(
-        title=f"Hourly cluster health: {status}",
+        title=f"Hourly workflow health: {status}",
         message=report,
     )
 
@@ -63,7 +67,7 @@ def main(mode: str = "status") -> None:
             raise ValueError(f"Unsupported cluster health monitor mode: {mode}")
     except Exception as error:
         alerts.send_alert(
-            title=f"Cluster health {mode} monitor failed",
+            title=f"Workflow health {mode} monitor failed",
             message=f"{type(error).__name__}: {error}",
             severity="critical",
         )
@@ -71,7 +75,7 @@ def main(mode: str = "status") -> None:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run a deterministic Cluster Health scheduled check."
+        description="Run a deterministic workflow pod health scheduled check."
     )
     parser.add_argument(
         "--mode",

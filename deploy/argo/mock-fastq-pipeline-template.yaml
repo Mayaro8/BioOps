@@ -42,6 +42,9 @@ spec:
                   value: "{{tasks.config-creator.outputs.parameters.generated-config}}"
 
     - name: seed-mock-batch
+      retryStrategy:
+        limit: "5"
+        retryPolicy: OnError
       metadata:
         labels:
           pipeline_step: seed-mock-batch
@@ -56,6 +59,9 @@ spec:
             mountPath: /mock-data
 
     - name: config-creator
+      retryStrategy:
+        limit: "5"
+        retryPolicy: OnError
       metadata:
         labels:
           pipeline_step: config-creator
@@ -81,6 +87,9 @@ spec:
               path: /tmp/mock-submit-master-config.json
 
     - name: submit-master
+      retryStrategy:
+        limit: "5"
+        retryPolicy: OnError
       metadata:
         labels:
           pipeline_step: submit-master

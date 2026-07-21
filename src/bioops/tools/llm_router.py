@@ -113,9 +113,10 @@ class LLMRouterTool:
                 "command examples, source code explanations, or stored project knowledge"
             ),
             "cluster_health": (
-                "general Kubernetes cluster health, pods, pod logs, failed/running jobs, "
-                "health monitor, cost, ETA, or runtime status when the request is not "
-                "specifically about Submit Master"
+                "operational health across Argo workflows and their Kubernetes pods: "
+                "per-workflow pod phases, current steps, recent pod errors, runtime, "
+                "cost, ETA, worker-node readiness, resource pressure, capacity, and "
+                "scheduling blockers"
             ),
             "review": (
                 "code review, repository review, GitHub pull requests, branch "
@@ -127,10 +128,10 @@ class LLMRouterTool:
                 "explicit confirmation and sample targeting; not status queries"
             ),
             "batch_status": (
-                "all batch processing queries: live Argo batch/sample/workflow progress, "
-                "pods, logs, errors, D4 failure diagnosis, ETA and runtime, plus persisted latest, failed, "
-                "running batches, completed batches, and stale batches; latest batch status, export, "
-                "and synchronization information"
+                "batch and sample tracking: selected batch/sample/workflow status, D3 "
+                "monitoring, D4 diagnosis, latest batch status, persisted failed batches, "
+                "running batches, completed batches, stale batches, live Argo status, "
+                "export, and synchronization information"
             ),
             "storage": (
                 "Bucket Agent inventory questions: object count, size, prefixes, files, "
@@ -159,9 +160,13 @@ Rules:
 - Choose storage for object-storage inventory, bucket paths, object sizes, file lists,
   storage classes, extensions, or inventory snapshot questions.
 - Choose submit_master for launching or explicitly confirmed retries.
-- Choose batch_status for all batch/sample/workflow queries, including live Argo progress,
-  pods, logs, errors, ETA, runtime, persisted history, completed/stale lists, sync, or export.
-- Choose cluster_health for general Kubernetes health not owned by SubmitMaster.
+- Choose batch_status for selected batch/sample status, D3/D4, persisted history,
+  completed/stale lists, synchronization, or export.
+- Choose cluster_health for health across workflows and their pods, including pod-phase
+  percentages, active step distribution, recent workflow-pod errors, runtime, cost, ETA,
+  node readiness, resource pressure, capacity, or unschedulable workflow pods.
+- Treat master node report, control-plane report, node health report, and cluster
+  capacity report as cluster_health requests.
 - Choose infra_cost for Compute Cloud VM cost, expensive VMs, GPU runtime,
   infrastructure cost alerts, database infrastructure, queues, or Cloud Functions.
 - Return JSON only.

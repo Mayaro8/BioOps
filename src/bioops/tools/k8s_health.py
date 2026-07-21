@@ -7,6 +7,7 @@ from typing import Any
 from kubernetes import client, config
 from kubernetes.client.exceptions import ApiException
 from kubernetes.config.config_exception import ConfigException
+from kubernetes.utils.quantity import parse_quantity
 
 
 @dataclass
@@ -18,10 +19,39 @@ class PodStatus:
     pipeline_step: str | None
     started_at: str | None
     runtime_minutes: float | None
+    workflow_name: str | None = None
+    batch_id: str | None = None
+    sample_id: str | None = None
+
+
+@dataclass
+class NodePressureStatus:
+    name: str
+    ready: bool
+    memory_pressure: bool
+    disk_pressure: bool
+    pid_pressure: bool
+    network_unavailable: bool
+
+
+@dataclass
+class NodePressureReport:
+    nodes: list[NodePressureStatus]
+    active_pods: int
+    pod_capacity: int
+    cpu_usage_percent: float | None
+    memory_usage_percent: float | None
+    metrics_nodes: int
+    unschedulable_workflow_pods: int
+    scheduling_reasons: dict[str, int]
 
 
 class K8sHealthTool:
-    """Read current Kubernetes pod health and recent pod errors."""
+    """Read Argo workflow pod health and recent pod errors."""
+
+    WORKFLOW_LABEL = "workflows.argoproj.io/workflow"
+    BATCH_LABEL = "bioops.dev/batch-id"
+    SAMPLE_LABEL = "bioops.dev/sample-id"
 
     PROBLEM_WAITING_REASONS = {
         "CrashLoopBackOff",
@@ -103,10 +133,188 @@ class K8sHealthTool:
                         else None
                     ),
                     runtime_minutes=runtime_minutes,
+                    workflow_name=labels.get(self.WORKFLOW_LABEL),
+                    batch_id=labels.get(self.BATCH_LABEL),
+                    sample_id=labels.get(self.SAMPLE_LABEL),
                 )
             )
 
         return results
+
+    @staticmethod
+    def _node_condition(node: Any, condition_type: str) -> bool:
+        conditions = getattr(node.status, "conditions", None) or []
+        return any(
+            condition.type == condition_type
+            and str(condition.status).lower() == "true"
+            for condition in conditions
+        )
+
+    @staticmethod
+    def _scheduling_reason(pod: Any) -> str:
+        conditions = getattr(pod.status, "conditions", None) or []
+        condition = next(
+            (
+                item
+                for item in conditions
+                if item.type == "PodScheduled"
+                and str(item.status).lower() == "false"
+            ),
+            None,
+        )
+        detail = " ".join(
+            filter(
+                None,
+                [
+                    getattr(condition, "reason", None),
+                    getattr(condition, "message", None),
+                ],
+            )
+        ).lower()
+
+        if "insufficient memory" in detail:
+            return "Insufficient memory"
+        if "insufficient cpu" in detail:
+            return "Insufficient CPU"
+        if "node affinity" in detail or "node selector" in detail:
+            return "Node selector or affinity mismatch"
+        if "taint" in detail:
+            return "Untolerated node taint"
+        return "Other scheduling constraint"
+
+    def get_node_pressure_report(self) -> NodePressureReport:
+        nodes_response = self.core_api.list_node(
+            _request_timeout=self.request_timeout_seconds,
+        )
+        pods_response = self.core_api.list_pod_for_all_namespaces(
+            _request_timeout=self.request_timeout_seconds,
+        )
+        raw_nodes = nodes_response.items
+        raw_pods = pods_response.items
+
+        nodes = [
+            NodePressureStatus(
+                name=node.metadata.name,
+                ready=self._node_condition(node, "Ready"),
+                memory_pressure=self._node_condition(
+                    node, "MemoryPressure"
+                ),
+                disk_pressure=self._node_condition(node, "DiskPressure"),
+                pid_pressure=self._node_condition(node, "PIDPressure"),
+                network_unavailable=self._node_condition(
+                    node, "NetworkUnavailable"
+                ),
+            )
+            for node in raw_nodes
+        ]
+
+        pod_capacity = sum(
+            int((node.status.allocatable or {}).get("pods", 0))
+            for node in raw_nodes
+        )
+        active_pods = sum(
+            1
+            for pod in raw_pods
+            if getattr(pod.status, "phase", None)
+            not in {"Succeeded", "Failed"}
+        )
+
+        workflow_pending = [
+            pod
+            for pod in raw_pods
+            if getattr(pod.metadata, "namespace", None) == self.namespace
+            and (getattr(pod.metadata, "labels", None) or {}).get(
+                self.WORKFLOW_LABEL
+            )
+            and getattr(pod.status, "phase", None) == "Pending"
+            and not getattr(pod.spec, "node_name", None)
+        ]
+        scheduling_reasons: dict[str, int] = {}
+        for pod in workflow_pending:
+            reason = self._scheduling_reason(pod)
+            scheduling_reasons[reason] = (
+                scheduling_reasons.get(reason, 0) + 1
+            )
+
+        cpu_usage_percent = None
+        memory_usage_percent = None
+        metrics_nodes = 0
+        try:
+            metrics = client.CustomObjectsApi().list_cluster_custom_object(
+                group="metrics.k8s.io",
+                version="v1beta1",
+                plural="nodes",
+                _request_timeout=self.request_timeout_seconds,
+            )
+            metrics_by_name = {
+                item["metadata"]["name"]: item
+                for item in metrics.get("items", [])
+            }
+            measured_nodes = [
+                node
+                for node in raw_nodes
+                if node.metadata.name in metrics_by_name
+            ]
+            metrics_nodes = len(measured_nodes)
+
+            if measured_nodes:
+                cpu_capacity = sum(
+                    float(
+                        parse_quantity(
+                            (node.status.allocatable or {}).get("cpu", "0")
+                        )
+                    )
+                    for node in measured_nodes
+                )
+                memory_capacity = sum(
+                    float(
+                        parse_quantity(
+                            (node.status.allocatable or {}).get(
+                                "memory", "0"
+                            )
+                        )
+                    )
+                    for node in measured_nodes
+                )
+                cpu_usage = sum(
+                    float(
+                        parse_quantity(
+                            metrics_by_name[node.metadata.name]["usage"][
+                                "cpu"
+                            ]
+                        )
+                    )
+                    for node in measured_nodes
+                )
+                memory_usage = sum(
+                    float(
+                        parse_quantity(
+                            metrics_by_name[node.metadata.name]["usage"][
+                                "memory"
+                            ]
+                        )
+                    )
+                    for node in measured_nodes
+                )
+                if cpu_capacity:
+                    cpu_usage_percent = cpu_usage / cpu_capacity * 100
+                if memory_capacity:
+                    memory_usage_percent = (
+                        memory_usage / memory_capacity * 100
+                    )
+        except (ApiException, KeyError, TypeError, ValueError):
+            pass
+
+        return NodePressureReport(
+            nodes=nodes,
+            active_pods=active_pods,
+            pod_capacity=pod_capacity,
+            cpu_usage_percent=cpu_usage_percent,
+            memory_usage_percent=memory_usage_percent,
+            metrics_nodes=metrics_nodes,
+            unschedulable_workflow_pods=len(workflow_pending),
+            scheduling_reasons=scheduling_reasons,
+        )
 
     def get_pod_logs(
         self,
@@ -327,6 +535,14 @@ class K8sHealthTool:
             return len(errors) >= limit
 
         for pod in pods:
+            labels = getattr(pod.metadata, "labels", None) or {}
+
+            if not (
+                labels.get(self.WORKFLOW_LABEL)
+                or labels.get("pipeline_step")
+            ):
+                continue
+
             phase = pod.status.phase
 
             # Successful historical jobs are not current errors.
