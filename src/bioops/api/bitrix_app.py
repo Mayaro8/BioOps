@@ -36,6 +36,7 @@ from bioops.api.yandex_auth import (
     create_state_token,
     email_is_allowed,
     safe_return_to,
+    sso_login_identifier,
     verify_state_token,
 )
 
@@ -352,7 +353,7 @@ def login_page_html(error: str = "", return_to: str = "/") -> str:
     <section class="auth-panel" aria-labelledby="sign-in-title">
       <p class="brand">BioOps</p>
       <h1 id="sign-in-title">Sign in</h1>
-      <p class="subtitle">Use your Genotek work account to continue.</p>
+      <p class="subtitle">Use your organization account to continue.</p>
       {error_html}
       <a class="sso-button" href="{html.escape(login_url)}">
         <span class="sso-mark" aria-hidden="true">Y</span>
@@ -360,7 +361,8 @@ def login_page_html(error: str = "", return_to: str = "/") -> str:
       </a>
       {local_access_html}
       <p class="access-note">
-        Company access is restricted to @genotek.ru accounts.
+        Access is restricted to authorized
+        @{html.escape(settings.allowed_domain)} accounts.
       </p>
     </section>
   </main>
@@ -1157,16 +1159,14 @@ def sso_callback(
             login_page_html("sso_failed"), status_code=502
         )
 
-    email = str(profile.get("email", "")).strip().casefold()
-    if not email_is_allowed(
-        email,
-        settings.allowed_domain,
-    ):
+    login_identifier = sso_login_identifier(
+        profile, settings.allowed_domain
+    )
+    if not login_identifier:
         response = HTMLResponse(
             login_page_html(
-                "Access denied. BioOps is available only to "
-                f"@{settings.allowed_domain} accounts or explicitly "
-                "approved users."
+                "Access denied. Identity Hub did not return an account "
+                f"in the @{settings.allowed_domain} organization."
             ),
             status_code=403,
         )
@@ -1176,11 +1176,11 @@ def sso_callback(
         )
         return response
 
-    if not get_auth_store().is_email_authorized(email):
+    if not get_auth_store().is_email_authorized(login_identifier):
         response = HTMLResponse(
             login_page_html(
-                "Access denied. This Genotek email is not active in the "
-                "BioOps employee database."
+                "Access denied. This organization account is not active "
+                "in the BioOps authorized-user database."
             ),
             status_code=403,
         )
@@ -1200,11 +1200,11 @@ def sso_callback(
     display_name = str(
         profile.get("name")
         or profile.get("preferred_username")
-        or email
+        or login_identifier
     ).strip()
     user = get_auth_store().link_sso_user(
         subject=subject,
-        email=email,
+        email=login_identifier,
         display_name=display_name,
     )
     session_token = get_auth_store().create_session(

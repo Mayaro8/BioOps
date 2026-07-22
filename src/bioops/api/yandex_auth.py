@@ -331,6 +331,21 @@ def email_is_allowed(
     )
 
 
+def sso_login_identifier(
+    profile: dict[str, Any], allowed_domain: str
+) -> str:
+    """Return the organization-controlled identifier from OIDC claims."""
+    candidates = (
+        profile.get("preferred_username", ""),
+        profile.get("email", ""),
+    )
+    for candidate in candidates:
+        normalized = str(candidate).strip().casefold()
+        if email_is_allowed(normalized, allowed_domain):
+            return normalized
+    return ""
+
+
 def _base64url(value: bytes) -> str:
     return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
 

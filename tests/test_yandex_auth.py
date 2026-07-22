@@ -94,8 +94,9 @@ def test_auth_store_links_repeated_sso_login_to_same_user(tmp_path) -> None:
 
 
 class FakeSSOClient:
-    def __init__(self, email: str) -> None:
+    def __init__(self, email: str, preferred_username: str = "") -> None:
         self.email = email
+        self.preferred_username = preferred_username
 
     def authorization_url(
         self,
@@ -124,6 +125,7 @@ class FakeSSOClient:
             "sub": "identity-hub-user-1",
             "email": self.email,
             "email_verified": True,
+            "preferred_username": self.preferred_username,
             "name": "BioOps User",
         }
 
@@ -208,6 +210,46 @@ def test_genotek_sso_user_signs_in_and_gets_session(
         assert client.get("/auth/me").status_code == 401
 
 
+def test_user_pool_username_is_used_as_login_identifier(
+    sso_environment, monkeypatch
+) -> None:
+    monkeypatch.setenv(
+        "BIOOPS_AUTH_ALLOWED_DOMAIN",
+        "bioopsers.idp.yandexcloud.net",
+    )
+    monkeypatch.setenv(
+        "BIOOPS_AUTH_BOOTSTRAP_EMAILS",
+        "mayar@bioopsers.idp.yandexcloud.net",
+    )
+    monkeypatch.setattr(bitrix_app, "_auth_store", None)
+    monkeypatch.setattr(
+        bitrix_app,
+        "_sso_client",
+        FakeSSOClient(
+            "mayar@example.com",
+            "mayar@bioopsers.idp.yandexcloud.net",
+        ),
+    )
+
+    with TestClient(bitrix_app.app) as client:
+        login_page = client.get("/login")
+        assert "Use your organization account" in login_page.text
+        assert "@bioopsers.idp.yandexcloud.net" in login_page.text
+        assert "Genotek work account" not in login_page.text
+
+        state = begin_login(client)
+        callback = client.get(
+            "/auth/sso/callback",
+            params={"code": "valid-code", "state": state},
+            follow_redirects=False,
+        )
+
+        assert callback.status_code == 303
+        assert client.get("/auth/me").json()["email"] == (
+            "mayar@bioopsers.idp.yandexcloud.net"
+        )
+
+
 def test_non_genotek_sso_user_is_rejected_clearly(
     sso_environment, monkeypatch
 ) -> None:
@@ -224,7 +266,7 @@ def test_non_genotek_sso_user_is_rejected_clearly(
         )
 
         assert callback.status_code == 403
-        assert "explicitly approved users" in callback.text
+        assert "did not return an account" in callback.text
         assert client.get("/auth/me").status_code == 401
 
 
@@ -244,8 +286,8 @@ def test_unlisted_genotek_sso_user_is_rejected(
         )
 
         assert callback.status_code == 403
-        assert "not active in the" in callback.text
-        assert "employee database" in callback.text
+        assert "not active" in callback.text
+        assert "authorized-user database" in callback.text
         assert client.get("/auth/me").status_code == 401
 
 

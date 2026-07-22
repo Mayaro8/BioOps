@@ -406,8 +406,8 @@ create these resources in an Identity Hub organization you control:
 3. Create an **OIDC Web Application** named BioOps.
 4. Assign only the local users or user-pool group that may access BioOps.
 
-Set `BIOOPS_AUTH_ALLOWED_DOMAIN` to the local users' email domain and add each
-email to the BioOps authorized-email database. A personal test organization
+Set `BIOOPS_AUTH_ALLOWED_DOMAIN` to the user pool's login domain and add each
+pool username to the BioOps authorized-user database. A personal test organization
 does not prove Genotek employment and should not claim control of
 `genotek.ru`. Production Genotek access must instead use Genotek's Identity
 Hub organization and assigned corporate users or groups.
@@ -433,10 +433,12 @@ three values in `bioops-secrets` as shown above. See the
 
 The browser redirects to the configured Identity Hub organization, exchanges the returned code on the
 server using PKCE, verifies the signed ID token against Identity Hub's JWKS,
-and checks its issuer, audience, expiry, nonce, subject, and email. BioOps
-creates a session only when the normalized address ends exactly with
-`@genotek.ru` **and** is enabled in the `authorized_emails` table. The employee
-directory, user identities, and hashed opaque sessions are stored in
+and checks its issuer, audience, expiry, nonce, and subject. BioOps uses the
+OIDC `preferred_username` claim as the pool identity, with the email claim as a
+fallback for providers that do not return a username. It creates a session only
+when that identifier belongs to `BIOOPS_AUTH_ALLOWED_DOMAIN` **and** is enabled
+in the `authorized_emails` table. The authorized-user directory, identities,
+and hashed opaque sessions are stored in
 `/data/bioops_auth.sqlite3` on the existing PVC.
 
 Manage the employee directory through the running API pod:
