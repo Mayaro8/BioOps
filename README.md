@@ -328,7 +328,7 @@ bioops-secrets
 ```
 
 It should contain the required Azure OpenAI, GitHub, Yandex Wiki, and Yandex
-ID OAuth values.
+Identity Hub OIDC values.
 
 Example:
 
@@ -342,8 +342,9 @@ echo
 read -rsp "Yandex Wiki read-only OAuth token: " YANDEX_WIKI_TOKEN
 echo
 
-read -rp "Yandex OAuth client ID: " YANDEX_OAUTH_CLIENT_ID
-read -rsp "Yandex OAuth client secret: " YANDEX_OAUTH_CLIENT_SECRET
+read -rp "Identity Hub OpenID Configuration URL: " YANDEX_SSO_OPENID_CONFIGURATION_URL
+read -rp "Identity Hub client ID: " YANDEX_SSO_CLIENT_ID
+read -rsp "Identity Hub client secret: " YANDEX_SSO_CLIENT_SECRET
 echo
 
 BIOOPS_SESSION_SECRET="$(openssl rand -base64 48)"
@@ -372,8 +373,9 @@ kubectl -n bioops-dev create secret generic bioops-secrets \
   --from-literal=AZURE_OPENAI_EMBEDDING_DEPLOYMENT="$AZURE_OPENAI_EMBEDDING_DEPLOYMENT" \
   --from-literal=GITHUB_TOKEN="$GITHUB_TOKEN" \
   --from-literal=YANDEX_WIKI_TOKEN="$YANDEX_WIKI_TOKEN" \
-  --from-literal=YANDEX_OAUTH_CLIENT_ID="$YANDEX_OAUTH_CLIENT_ID" \
-  --from-literal=YANDEX_OAUTH_CLIENT_SECRET="$YANDEX_OAUTH_CLIENT_SECRET" \
+  --from-literal=YANDEX_SSO_OPENID_CONFIGURATION_URL="$YANDEX_SSO_OPENID_CONFIGURATION_URL" \
+  --from-literal=YANDEX_SSO_CLIENT_ID="$YANDEX_SSO_CLIENT_ID" \
+  --from-literal=YANDEX_SSO_CLIENT_SECRET="$YANDEX_SSO_CLIENT_SECRET" \
   --from-literal=BIOOPS_SESSION_SECRET="$BIOOPS_SESSION_SECRET" \
   --from-literal=BIOOPS_LOCAL_ACCESS_CODE="$BIOOPS_LOCAL_ACCESS_CODE" \
   --dry-run=client \
@@ -385,27 +387,86 @@ Clear the shell variables:
 
 ```bash
 unset AZURE_OPENAI_API_KEY GITHUB_TOKEN YANDEX_WIKI_TOKEN
-unset YANDEX_OAUTH_CLIENT_ID YANDEX_OAUTH_CLIENT_SECRET BIOOPS_SESSION_SECRET
+unset YANDEX_SSO_OPENID_CONFIGURATION_URL YANDEX_SSO_CLIENT_ID
+unset YANDEX_SSO_CLIENT_SECRET BIOOPS_SESSION_SECRET
 unset BIOOPS_LOCAL_ACCESS_CODE
 ```
 
 ---
 
-## 10. Browser Yandex ID Login
+## 10. Corporate SSO with Yandex Identity Hub
 
-Register a user-login application in the
-[Yandex OAuth console](https://oauth.yandex.com/) with email and basic profile
-access. Its exact production redirect URI must be:
+BioOps uses an Identity Hub OIDC application and never requests the `phone`
+scope. For an email-and-password demo without Yandex ID or phone-number login,
+create these resources in an Identity Hub organization you control:
+
+1. Create a **user pool** and choose its default login domain.
+2. Add local users with a username, email, and password. Leave the optional
+   phone-number field empty.
+3. Create an **OIDC Web Application** named BioOps.
+4. Assign only the local users or user-pool group that may access BioOps.
+
+Set `BIOOPS_AUTH_ALLOWED_DOMAIN` to the local users' email domain and add each
+email to the BioOps authorized-email database. A personal test organization
+does not prove Genotek employment and should not claim control of
+`genotek.ru`. Production Genotek access must instead use Genotek's Identity
+Hub organization and assigned corporate users or groups.
+
+Configure the OIDC application with these settings:
+
+- Redirect URI: the exact production callback below.
+- Scopes: `openid`, `email`, and `profile`.
+- Client authentication: `client_secret_post`.
+- PKCE: required.
+- Users and groups: assign only the users who may use BioOps.
+
+The exact production redirect URI is:
 
 ```text
-https://bioops.84-201-181-221.sslip.io/auth/yandex/callback
+https://bioops.84-201-181-221.sslip.io/auth/sso/callback
 ```
 
-The browser redirects to Yandex, exchanges the returned code on the server,
-reads `default_email`, and creates a BioOps session only when the normalized
-address ends exactly with `@genotek.ru`. Other addresses receive HTTP 403 with
-a clear access-denied message. User identities and hashed opaque sessions are
-stored in `/data/bioops_auth.sqlite3` on the existing PVC.
+From the Identity Hub application overview, copy its **OpenID Configuration**
+URL and **ClientID**, then create and copy an application secret. Put those
+three values in `bioops-secrets` as shown above. See the
+[Yandex Identity Hub OIDC application guide](https://yandex.cloud/en/docs/organization/operations/applications/oidc-create).
+
+The browser redirects to the configured Identity Hub organization, exchanges the returned code on the
+server using PKCE, verifies the signed ID token against Identity Hub's JWKS,
+and checks its issuer, audience, expiry, nonce, subject, and email. BioOps
+creates a session only when the normalized address ends exactly with
+`@genotek.ru` **and** is enabled in the `authorized_emails` table. The employee
+directory, user identities, and hashed opaque sessions are stored in
+`/data/bioops_auth.sqlite3` on the existing PVC.
+
+Manage the employee directory through the running API pod:
+
+```bash
+kubectl -n bioops-dev exec deployment/bioops-api -c bioops-api -- \
+  python -m bioops.api.auth_admin add person@genotek.ru --name "Person Name"
+
+kubectl -n bioops-dev exec deployment/bioops-api -c bioops-api -- \
+  python -m bioops.api.auth_admin list
+
+kubectl -n bioops-dev exec deployment/bioops-api -c bioops-api -- \
+  python -m bioops.api.auth_admin disable person@genotek.ru
+```
+
+For bulk provisioning, copy a CSV containing `email,display_name` into the pod
+and import it:
+
+```bash
+POD="$(kubectl -n bioops-dev get pod -l app=bioops-api \
+  -o jsonpath='{.items[0].metadata.name}')"
+kubectl -n bioops-dev cp employees.csv "$POD:/tmp/employees.csv" -c bioops-api
+kubectl -n bioops-dev exec "$POD" -c bioops-api -- \
+  python -m bioops.api.auth_admin import-csv /tmp/employees.csv
+```
+
+Disabling an employee also revokes that employee's existing BioOps sessions.
+`BIOOPS_AUTH_BOOTSTRAP_EMAILS` can contain a comma-separated initial list for
+development, but it should remain empty in production after the database is
+provisioned.
 
 The deployment also enables a separate developer-code form for environments
 where a Genotek Yandex account is unavailable. Set a strong value of at least
@@ -418,14 +479,42 @@ minutes temporarily block further attempts. Disable this path at any time with
 For local HTTP development, configure:
 
 ```bash
-YANDEX_OAUTH_REDIRECT_URI=http://localhost:8000/auth/yandex/callback
+YANDEX_SSO_REDIRECT_URI=http://localhost:8000/auth/sso/callback
 BIOOPS_COOKIE_SECURE=false
 ```
 
-Keep `BIOOPS_COOKIE_SECURE=true` in Kubernetes. OAuth state is signed and
+Keep `BIOOPS_COOKIE_SECURE=true` in Kubernetes. OIDC state is signed and
 time-limited, and browser sessions use `HttpOnly`, `Secure`, `SameSite=Lax`
 cookies. Caddy now provides TLS and reverse proxying only; the old shared
 basic-auth password is no longer used.
+
+To exercise the full redirect and callback locally without corporate
+credentials, start the development Identity Hub in one terminal:
+
+```bash
+PYTHONPATH=src uvicorn scripts.mock_identity_hub:app \
+  --host 127.0.0.1 --port 8001
+```
+
+Then start BioOps in another terminal with the matching test-only values:
+
+```bash
+BIOOPS_SSO_ENABLED=true \
+YANDEX_SSO_OPENID_CONFIGURATION_URL=http://127.0.0.1:8001/.well-known/openid-configuration \
+YANDEX_SSO_CLIENT_ID=bioops-local \
+YANDEX_SSO_CLIENT_SECRET=local-sso-secret \
+YANDEX_SSO_REDIRECT_URI=http://127.0.0.1:8000/auth/sso/callback \
+BIOOPS_SESSION_SECRET=local-session-secret-for-testing \
+BIOOPS_COOKIE_SECURE=false \
+BIOOPS_AUTH_DB_PATH=./data/local-sso.sqlite3 \
+BIOOPS_AUTH_BOOTSTRAP_EMAILS=person@genotek.ru \
+PYTHONPATH=src uvicorn bioops.api.bitrix_app:app \
+  --host 127.0.0.1 --port 8000
+```
+
+Open `http://127.0.0.1:8000`. The local provider defaults to
+`person@genotek.ru`, signs a real RS256 ID token, validates PKCE, and returns
+through the same BioOps callback used by the production integration.
 
 ---
 

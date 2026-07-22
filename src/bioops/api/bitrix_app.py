@@ -7,6 +7,7 @@ import io
 import json
 import logging
 import os
+import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import parse_qs, urlencode
@@ -29,8 +30,9 @@ from bioops.tools.bitrix_sender import BitrixSender
 from bioops.tools.notification_store import NotificationStore
 from bioops.api.yandex_auth import (
     AuthStore,
-    YandexAuthSettings,
-    YandexOAuthClient,
+    CorporateSSOSettings,
+    IdentityHubOIDCClient,
+    create_pkce_verifier,
     create_state_token,
     email_is_allowed,
     safe_return_to,
@@ -50,40 +52,48 @@ bitrix_sender = BitrixSender()
 _notification_store: NotificationStore | None = None
 _batch_status_store: BatchStatusStore | None = None
 _auth_store: AuthStore | None = None
-_yandex_oauth_client: YandexOAuthClient | None = None
+_sso_client: IdentityHubOIDCClient | None = None
 
 
-def get_auth_settings() -> YandexAuthSettings:
-    return YandexAuthSettings.from_env()
+def get_auth_settings() -> CorporateSSOSettings:
+    return CorporateSSOSettings.from_env()
 
 
 def get_auth_store() -> AuthStore:
     global _auth_store
 
     if _auth_store is None:
+        settings = get_auth_settings()
         _auth_store = AuthStore(
             os.getenv(
                 "BIOOPS_AUTH_DB_PATH",
                 "/data/bioops_auth.sqlite3",
             )
         )
+        for email in settings.bootstrap_emails:
+            if email_is_allowed(email, settings.allowed_domain):
+                _auth_store.authorize_email(email, source="bootstrap")
+            else:
+                logger.warning(
+                    "Ignoring non-corporate bootstrap email: %s", email
+                )
     return _auth_store
 
 
-def get_yandex_oauth_client() -> YandexOAuthClient:
-    global _yandex_oauth_client
+def get_sso_client() -> IdentityHubOIDCClient:
+    global _sso_client
 
     settings = get_auth_settings()
-    if _yandex_oauth_client is None:
-        _yandex_oauth_client = YandexOAuthClient(settings)
-    return _yandex_oauth_client
+    if _sso_client is None:
+        _sso_client = IdentityHubOIDCClient(settings)
+    return _sso_client
 
 
 PUBLIC_PATHS = {
     "/health",
     "/login",
-    "/auth/yandex/login",
-    "/auth/yandex/callback",
+    "/auth/sso/login",
+    "/auth/sso/callback",
     "/auth/local",
     "/internal/alerts",
     "/bitrix/message",
@@ -113,7 +123,7 @@ async def require_browser_session(request: Request, call_next):
 
     return JSONResponse(
         status_code=401,
-        content={"detail": "Sign in with an authorized Yandex account."},
+        content={"detail": "Sign in with an authorized corporate account."},
     )
 
 
@@ -162,8 +172,8 @@ class ChatResponse(BaseModel):
 
 
 AUTH_ERROR_MESSAGES = {
-    "oauth_denied": "Yandex authorization was cancelled or denied.",
-    "oauth_failed": "Yandex sign-in could not be completed. Please try again.",
+    "sso_denied": "Corporate sign-in was cancelled or denied.",
+    "sso_failed": "Corporate sign-in could not be completed. Please try again.",
     "invalid_state": "The sign-in request expired or was invalid. Please try again.",
     "invalid_local_code": "The developer access code is invalid.",
 }
@@ -178,7 +188,7 @@ def login_page_html(error: str = "", return_to: str = "/") -> str:
         if message
         else ""
     )
-    login_url = "/auth/yandex/login?" + urlencode(
+    login_url = "/auth/sso/login?" + urlencode(
         {"next": safe_return_to(return_to)}
     )
     settings = get_auth_settings()
@@ -253,7 +263,7 @@ def login_page_html(error: str = "", return_to: str = "/") -> str:
       color: #626b78;
       line-height: 1.5;
     }}
-    .yandex-button {{
+    .sso-button {{
       display: flex;
       align-items: center;
       justify-content: center;
@@ -266,7 +276,7 @@ def login_page_html(error: str = "", return_to: str = "/") -> str:
       font-weight: 700;
       text-decoration: none;
     }}
-    .yandex-mark {{
+    .sso-mark {{
       display: grid;
       width: 26px;
       height: 26px;
@@ -342,11 +352,11 @@ def login_page_html(error: str = "", return_to: str = "/") -> str:
     <section class="auth-panel" aria-labelledby="sign-in-title">
       <p class="brand">BioOps</p>
       <h1 id="sign-in-title">Sign in</h1>
-      <p class="subtitle">Use your company Yandex ID to continue.</p>
+      <p class="subtitle">Use your Genotek work account to continue.</p>
       {error_html}
-      <a class="yandex-button" href="{html.escape(login_url)}">
-        <span class="yandex-mark" aria-hidden="true">Y</span>
-        Sign in with Yandex
+      <a class="sso-button" href="{html.escape(login_url)}">
+        <span class="sso-mark" aria-hidden="true">Y</span>
+        Continue with work email
       </a>
       {local_access_html}
       <p class="access-note">
@@ -978,26 +988,41 @@ def login_page(
     return HTMLResponse(login_page_html(error, next))
 
 
-@app.get("/auth/yandex/login")
-def yandex_login(next: str = "/") -> Response:
+@app.get("/auth/sso/login")
+def sso_login(next: str = "/") -> Response:
     settings = get_auth_settings()
     try:
-        settings.require_oauth_configuration()
+        settings.require_sso_configuration()
     except RuntimeError:
-        logger.exception("Yandex OAuth configuration is incomplete.")
+        logger.exception("Corporate SSO configuration is incomplete.")
         return HTMLResponse(
             login_page_html(
-                "Yandex sign-in is not configured. Contact the BioOps administrator."
+                "Corporate SSO is not configured. Contact the BioOps administrator."
             ),
             status_code=503,
         )
 
+    oidc_nonce = secrets.token_urlsafe(32)
+    code_verifier = create_pkce_verifier()
     state = create_state_token(
         secret=settings.session_secret,
         return_to=safe_return_to(next),
+        oidc_nonce=oidc_nonce,
+        code_verifier=code_verifier,
     )
+    try:
+        authorization_url = get_sso_client().authorization_url(
+            state=state,
+            nonce=oidc_nonce,
+            code_verifier=code_verifier,
+        )
+    except (RuntimeError, RequestException):
+        logger.exception("Corporate SSO discovery failed.")
+        return HTMLResponse(
+            login_page_html("sso_failed"), status_code=502
+        )
     response = RedirectResponse(
-        get_yandex_oauth_client().authorization_url(state),
+        authorization_url,
         status_code=303,
     )
     response.set_cookie(
@@ -1007,7 +1032,7 @@ def yandex_login(next: str = "/") -> Response:
         httponly=True,
         secure=settings.cookie_secure,
         samesite="lax",
-        path="/auth/yandex/callback",
+        path="/auth/sso/callback",
     )
     return response
 
@@ -1078,8 +1103,8 @@ async def local_access_login(request: Request) -> Response:
     return response
 
 
-@app.get("/auth/yandex/callback")
-def yandex_callback(
+@app.get("/auth/sso/callback")
+def sso_callback(
     request: Request,
     code: str = "",
     state: str = "",
@@ -1087,21 +1112,21 @@ def yandex_callback(
 ) -> Response:
     settings = get_auth_settings()
     try:
-        settings.require_oauth_configuration()
+        settings.require_sso_configuration()
     except RuntimeError:
         return HTMLResponse(
             login_page_html(
-                "Yandex sign-in is not configured. Contact the BioOps administrator."
+                "Corporate SSO is not configured. Contact the BioOps administrator."
             ),
             status_code=503,
         )
     if error:
         return HTMLResponse(
-            login_page_html("oauth_denied"), status_code=400
+            login_page_html("sso_denied"), status_code=400
         )
     if not code:
         return HTMLResponse(
-            login_page_html("Yandex did not return an authorization code."),
+            login_page_html("Identity Hub did not return an authorization code."),
             status_code=400,
         )
 
@@ -1119,19 +1144,23 @@ def yandex_callback(
             secret=settings.session_secret,
             ttl_minutes=settings.state_ttl_minutes,
         )
-        access_token = get_yandex_oauth_client().exchange_code(code)
-        profile = get_yandex_oauth_client().get_user_info(access_token)
+        oidc_nonce = str(state_payload["oidc_nonce"])
+        code_verifier = str(state_payload["code_verifier"])
+        profile = get_sso_client().complete_login(
+            code=code,
+            code_verifier=code_verifier,
+            nonce=oidc_nonce,
+        )
     except (ValueError, RuntimeError, RequestException):
-        logger.exception("Yandex OAuth callback failed.")
+        logger.exception("Corporate SSO callback failed.")
         return HTMLResponse(
-            login_page_html("oauth_failed"), status_code=502
+            login_page_html("sso_failed"), status_code=502
         )
 
-    email = str(profile.get("default_email", "")).strip().casefold()
+    email = str(profile.get("email", "")).strip().casefold()
     if not email_is_allowed(
         email,
         settings.allowed_domain,
-        settings.allowed_emails,
     ):
         response = HTMLResponse(
             login_page_html(
@@ -1143,24 +1172,38 @@ def yandex_callback(
         )
         response.delete_cookie(
             settings.state_cookie_name,
-            path="/auth/yandex/callback",
+            path="/auth/sso/callback",
         )
         return response
 
-    yandex_id = str(profile.get("id", "")).strip()
-    if not yandex_id:
+    if not get_auth_store().is_email_authorized(email):
+        response = HTMLResponse(
+            login_page_html(
+                "Access denied. This Genotek email is not active in the "
+                "BioOps employee database."
+            ),
+            status_code=403,
+        )
+        response.delete_cookie(
+            settings.state_cookie_name,
+            path="/auth/sso/callback",
+        )
+        return response
+
+    subject = str(profile.get("sub", "")).strip()
+    if not subject:
         return HTMLResponse(
-            login_page_html("Yandex did not return a stable user ID."),
+            login_page_html("Identity Hub did not return a stable user ID."),
             status_code=502,
         )
 
     display_name = str(
-        profile.get("display_name")
-        or profile.get("real_name")
+        profile.get("name")
+        or profile.get("preferred_username")
         or email
     ).strip()
-    user = get_auth_store().link_yandex_user(
-        yandex_id=yandex_id,
+    user = get_auth_store().link_sso_user(
+        subject=subject,
         email=email,
         display_name=display_name,
     )
@@ -1183,7 +1226,7 @@ def yandex_callback(
     )
     response.delete_cookie(
         settings.state_cookie_name,
-        path="/auth/yandex/callback",
+        path="/auth/sso/callback",
     )
     return response
 

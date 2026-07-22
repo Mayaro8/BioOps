@@ -13,12 +13,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
+import jwt
 import requests
-
-
-YANDEX_AUTHORIZE_URL = "https://oauth.yandex.com/authorize"
-YANDEX_TOKEN_URL = "https://oauth.yandex.com/token"
-YANDEX_USER_INFO_URL = "https://login.yandex.ru/info"
 
 
 def _boolean_env(name: str, default: bool) -> bool:
@@ -28,15 +24,24 @@ def _boolean_env(name: str, default: bool) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _secure_or_local_url(value: str) -> bool:
+    return (
+        value.startswith("https://")
+        or value.startswith("http://localhost")
+        or value.startswith("http://127.0.0.1")
+    )
+
+
 @dataclass(frozen=True)
-class YandexAuthSettings:
+class CorporateSSOSettings:
     enabled: bool
+    configuration_url: str
     client_id: str
     client_secret: str
     redirect_uri: str
     session_secret: str
     allowed_domain: str
-    allowed_emails: tuple[str, ...]
+    bootstrap_emails: tuple[str, ...]
     local_access_enabled: bool
     local_access_code: str
     session_cookie_name: str
@@ -45,22 +50,26 @@ class YandexAuthSettings:
     state_ttl_minutes: int
     cookie_secure: bool
     request_timeout_seconds: int
+    token_auth_method: str
 
     @classmethod
-    def from_env(cls) -> "YandexAuthSettings":
+    def from_env(cls) -> "CorporateSSOSettings":
         return cls(
-            enabled=_boolean_env("YANDEX_AUTH_ENABLED", True),
-            client_id=os.getenv("YANDEX_OAUTH_CLIENT_ID", "").strip(),
-            client_secret=os.getenv("YANDEX_OAUTH_CLIENT_SECRET", "").strip(),
-            redirect_uri=os.getenv("YANDEX_OAUTH_REDIRECT_URI", "").strip(),
+            enabled=_boolean_env("BIOOPS_SSO_ENABLED", True),
+            configuration_url=os.getenv(
+                "YANDEX_SSO_OPENID_CONFIGURATION_URL", ""
+            ).strip(),
+            client_id=os.getenv("YANDEX_SSO_CLIENT_ID", "").strip(),
+            client_secret=os.getenv("YANDEX_SSO_CLIENT_SECRET", "").strip(),
+            redirect_uri=os.getenv("YANDEX_SSO_REDIRECT_URI", "").strip(),
             session_secret=os.getenv("BIOOPS_SESSION_SECRET", "").strip(),
             allowed_domain=os.getenv(
-                "YANDEX_AUTH_ALLOWED_DOMAIN", "genotek.ru"
+                "BIOOPS_AUTH_ALLOWED_DOMAIN", "genotek.ru"
             ).strip().lower().lstrip("@"),
-            allowed_emails=tuple(
+            bootstrap_emails=tuple(
                 email.strip().casefold()
                 for email in os.getenv(
-                    "YANDEX_AUTH_ALLOWED_EMAILS", ""
+                    "BIOOPS_AUTH_BOOTSTRAP_EMAILS", ""
                 ).split(",")
                 if email.strip()
             ),
@@ -73,31 +82,52 @@ class YandexAuthSettings:
             session_cookie_name=os.getenv(
                 "BIOOPS_SESSION_COOKIE", "bioops_session"
             ).strip(),
-            state_cookie_name="bioops_oauth_state",
+            state_cookie_name="bioops_sso_state",
             session_ttl_hours=max(
                 1, int(os.getenv("BIOOPS_SESSION_TTL_HOURS", "12"))
             ),
             state_ttl_minutes=10,
             cookie_secure=_boolean_env("BIOOPS_COOKIE_SECURE", True),
             request_timeout_seconds=max(
-                1, int(os.getenv("YANDEX_OAUTH_TIMEOUT_SECONDS", "10"))
+                1, int(os.getenv("BIOOPS_SSO_TIMEOUT_SECONDS", "10"))
             ),
+            token_auth_method=os.getenv(
+                "YANDEX_SSO_TOKEN_AUTH_METHOD", "client_secret_post"
+            ).strip(),
         )
 
-    def require_oauth_configuration(self) -> None:
+    def require_sso_configuration(self) -> None:
         missing = [
             name
             for name, value in {
-                "YANDEX_OAUTH_CLIENT_ID": self.client_id,
-                "YANDEX_OAUTH_CLIENT_SECRET": self.client_secret,
-                "YANDEX_OAUTH_REDIRECT_URI": self.redirect_uri,
+                "YANDEX_SSO_OPENID_CONFIGURATION_URL": self.configuration_url,
+                "YANDEX_SSO_CLIENT_ID": self.client_id,
+                "YANDEX_SSO_CLIENT_SECRET": self.client_secret,
+                "YANDEX_SSO_REDIRECT_URI": self.redirect_uri,
                 "BIOOPS_SESSION_SECRET": self.session_secret,
             }.items()
             if not value
         ]
         if missing:
             raise RuntimeError(
-                "Yandex OAuth is not configured: " + ", ".join(missing)
+                "Corporate SSO is not configured: " + ", ".join(missing)
+            )
+        if not _secure_or_local_url(self.configuration_url):
+            raise RuntimeError(
+                "YANDEX_SSO_OPENID_CONFIGURATION_URL must use HTTPS "
+                "outside localhost"
+            )
+        if not _secure_or_local_url(self.redirect_uri):
+            raise RuntimeError(
+                "YANDEX_SSO_REDIRECT_URI must use HTTPS outside localhost"
+            )
+        if self.token_auth_method not in {
+            "client_secret_basic",
+            "client_secret_post",
+        }:
+            raise RuntimeError(
+                "YANDEX_SSO_TOKEN_AUTH_METHOD must be client_secret_basic "
+                "or client_secret_post"
             )
 
     def require_local_access_configuration(self) -> None:
@@ -109,54 +139,183 @@ class YandexAuthSettings:
             )
 
 
-class YandexOAuthClient:
+class IdentityHubOIDCClient:
     def __init__(
         self,
-        settings: YandexAuthSettings,
+        settings: CorporateSSOSettings,
         session: requests.Session | None = None,
     ) -> None:
         self.settings = settings
         self.session = session or requests.Session()
+        self._discovery: dict[str, Any] | None = None
 
-    def authorization_url(self, state: str) -> str:
-        return f"{YANDEX_AUTHORIZE_URL}?{urlencode({
-            'response_type': 'code',
-            'client_id': self.settings.client_id,
-            'redirect_uri': self.settings.redirect_uri,
-            'scope': 'login:email,login:info',
-            'state': state,
-        })}"
-
-    def exchange_code(self, code: str) -> str:
-        response = self.session.post(
-            YANDEX_TOKEN_URL,
-            data={
-                "grant_type": "authorization_code",
-                "code": code,
-                "client_id": self.settings.client_id,
-                "client_secret": self.settings.client_secret,
-            },
-            timeout=self.settings.request_timeout_seconds,
-        )
-        response.raise_for_status()
-        payload = response.json()
-        token = payload.get("access_token")
-        if not isinstance(token, str) or not token:
-            raise RuntimeError("Yandex token response has no access_token")
-        return token
-
-    def get_user_info(self, access_token: str) -> dict[str, Any]:
+    def _configuration(self) -> dict[str, Any]:
+        if self._discovery is not None:
+            return self._discovery
         response = self.session.get(
-            YANDEX_USER_INFO_URL,
-            params={"format": "json"},
-            headers={"Authorization": f"OAuth {access_token}"},
+            self.settings.configuration_url,
             timeout=self.settings.request_timeout_seconds,
         )
         response.raise_for_status()
         payload = response.json()
         if not isinstance(payload, dict):
-            raise RuntimeError("Yandex user response is invalid")
+            raise RuntimeError("Identity Hub discovery response is invalid")
+        required = {
+            "issuer",
+            "authorization_endpoint",
+            "token_endpoint",
+            "userinfo_endpoint",
+            "jwks_uri",
+        }
+        missing = sorted(
+            key
+            for key in required
+            if not isinstance(payload.get(key), str) or not payload[key]
+        )
+        if missing:
+            raise RuntimeError(
+                "Identity Hub discovery is missing: " + ", ".join(missing)
+            )
+        insecure = sorted(
+            key
+            for key in required - {"issuer"}
+            if not _secure_or_local_url(str(payload[key]))
+        )
+        if insecure:
+            raise RuntimeError(
+                "Identity Hub endpoints must use HTTPS: "
+                + ", ".join(insecure)
+            )
+        self._discovery = payload
         return payload
+
+    def authorization_url(
+        self,
+        *,
+        state: str,
+        nonce: str,
+        code_verifier: str,
+    ) -> str:
+        configuration = self._configuration()
+        code_challenge = _base64url(
+            hashlib.sha256(code_verifier.encode("ascii")).digest()
+        )
+        return f"{configuration['authorization_endpoint']}?{urlencode({
+            'response_type': 'code',
+            'client_id': self.settings.client_id,
+            'redirect_uri': self.settings.redirect_uri,
+            'scope': 'openid email profile',
+            'state': state,
+            'nonce': nonce,
+            'code_challenge': code_challenge,
+            'code_challenge_method': 'S256',
+        })}"
+
+    def exchange_code(self, code: str, code_verifier: str) -> dict[str, Any]:
+        configuration = self._configuration()
+        data = {
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": self.settings.redirect_uri,
+            "client_id": self.settings.client_id,
+            "code_verifier": code_verifier,
+        }
+        auth: tuple[str, str] | None = None
+        if self.settings.token_auth_method == "client_secret_post":
+            data["client_secret"] = self.settings.client_secret
+        else:
+            auth = (self.settings.client_id, self.settings.client_secret)
+        response = self.session.post(
+            configuration["token_endpoint"],
+            data=data,
+            auth=auth,
+            timeout=self.settings.request_timeout_seconds,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise RuntimeError("Identity Hub token response is invalid")
+        for name in ("access_token", "id_token"):
+            if not isinstance(payload.get(name), str) or not payload[name]:
+                raise RuntimeError(
+                    f"Identity Hub token response has no {name}"
+                )
+        return payload
+
+    def get_user_info(self, access_token: str) -> dict[str, Any]:
+        configuration = self._configuration()
+        response = self.session.get(
+            configuration["userinfo_endpoint"],
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=self.settings.request_timeout_seconds,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise RuntimeError("Identity Hub user response is invalid")
+        return payload
+
+    def verify_id_token(self, id_token: str, nonce: str) -> dict[str, Any]:
+        configuration = self._configuration()
+        supported = configuration.get(
+            "id_token_signing_alg_values_supported", ["RS256"]
+        )
+        safe_algorithms = [
+            algorithm
+            for algorithm in supported
+            if algorithm
+            in {
+                "RS256",
+                "RS384",
+                "RS512",
+                "PS256",
+                "PS384",
+                "PS512",
+                "ES256",
+                "ES384",
+                "ES512",
+            }
+        ]
+        if not safe_algorithms:
+            raise RuntimeError("Identity Hub has no supported signing algorithm")
+        try:
+            jwk_client = jwt.PyJWKClient(
+                configuration["jwks_uri"],
+                cache_keys=True,
+                timeout=self.settings.request_timeout_seconds,
+            )
+            signing_key = jwk_client.get_signing_key_from_jwt(id_token)
+            claims = jwt.decode(
+                id_token,
+                signing_key.key,
+                algorithms=safe_algorithms,
+                audience=self.settings.client_id,
+                issuer=configuration["issuer"],
+                options={
+                    "require": ["aud", "exp", "iat", "iss", "sub"],
+                },
+            )
+        except jwt.PyJWTError as error:
+            raise RuntimeError("Identity Hub ID token is invalid") from error
+        if not hmac.compare_digest(str(claims.get("nonce", "")), nonce):
+            raise RuntimeError("Identity Hub nonce is invalid")
+        return claims
+
+    def complete_login(
+        self,
+        *,
+        code: str,
+        code_verifier: str,
+        nonce: str,
+    ) -> dict[str, Any]:
+        token = self.exchange_code(code, code_verifier)
+        claims = self.verify_id_token(str(token["id_token"]), nonce)
+        profile = self.get_user_info(str(token["access_token"]))
+        if not hmac.compare_digest(
+            str(claims.get("sub", "")), str(profile.get("sub", ""))
+        ):
+            raise RuntimeError("Identity Hub user subject does not match")
+        return {**claims, **profile}
 
 
 def email_is_allowed(
@@ -180,18 +339,28 @@ def _decode_base64url(value: str) -> bytes:
     return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
 
 
+def create_pkce_verifier() -> str:
+    return secrets.token_urlsafe(64)
+
+
 def create_state_token(
     *,
     secret: str,
     return_to: str,
+    oidc_nonce: str = "",
+    code_verifier: str = "",
     now: datetime | None = None,
 ) -> str:
     current = now or datetime.now(timezone.utc)
     payload = {
-        "nonce": secrets.token_urlsafe(24),
+        "request_id": secrets.token_urlsafe(24),
         "return_to": safe_return_to(return_to),
         "issued_at": int(current.timestamp()),
     }
+    if oidc_nonce:
+        payload["oidc_nonce"] = oidc_nonce
+    if code_verifier:
+        payload["code_verifier"] = code_verifier
     encoded = _base64url(
         json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
     )
@@ -266,6 +435,14 @@ class AuthStore:
                     user_id INTEGER NOT NULL REFERENCES users(id),
                     PRIMARY KEY (provider, provider_user_id)
                 );
+                CREATE TABLE IF NOT EXISTS authorized_emails (
+                    email TEXT PRIMARY KEY COLLATE NOCASE,
+                    display_name TEXT NOT NULL DEFAULT '',
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    source TEXT NOT NULL DEFAULT 'manual',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS sessions (
                     token_hash TEXT PRIMARY KEY,
                     user_id INTEGER NOT NULL REFERENCES users(id),
@@ -276,6 +453,87 @@ class AuthStore:
                     ON sessions(user_id);
                 """
             )
+
+    def authorize_email(
+        self,
+        email: str,
+        *,
+        display_name: str = "",
+        source: str = "manual",
+    ) -> dict[str, Any]:
+        normalized = email.strip().casefold()
+        if not normalized or "@" not in normalized:
+            raise ValueError("A valid email address is required")
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO authorized_emails(
+                    email, display_name, enabled, source, created_at, updated_at
+                ) VALUES (?, ?, 1, ?, ?, ?)
+                ON CONFLICT(email) DO UPDATE SET
+                    display_name = excluded.display_name,
+                    enabled = 1,
+                    source = excluded.source,
+                    updated_at = excluded.updated_at
+                """,
+                (normalized, display_name.strip(), source.strip(), now, now),
+            )
+            row = connection.execute(
+                """
+                SELECT email, display_name, enabled, source, created_at, updated_at
+                FROM authorized_emails WHERE email = ? COLLATE NOCASE
+                """,
+                (normalized,),
+            ).fetchone()
+        return dict(row)
+
+    def disable_email(self, email: str) -> bool:
+        normalized = email.strip().casefold()
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE authorized_emails SET enabled = 0, updated_at = ?
+                WHERE email = ? COLLATE NOCASE AND enabled = 1
+                """,
+                (now, normalized),
+            )
+            connection.execute(
+                """
+                DELETE FROM sessions WHERE user_id IN (
+                    SELECT id FROM users WHERE email = ? COLLATE NOCASE
+                )
+                """,
+                (normalized,),
+            )
+        return cursor.rowcount > 0
+
+    def is_email_authorized(self, email: str) -> bool:
+        normalized = email.strip().casefold()
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT 1 FROM authorized_emails
+                WHERE email = ? COLLATE NOCASE AND enabled = 1
+                """,
+                (normalized,),
+            ).fetchone()
+        return row is not None
+
+    def list_authorized_emails(
+        self, *, include_disabled: bool = False
+    ) -> list[dict[str, Any]]:
+        where = "" if include_disabled else "WHERE enabled = 1"
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT email, display_name, enabled, source, created_at, updated_at
+                FROM authorized_emails {where}
+                ORDER BY email COLLATE NOCASE
+                """
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def link_external_user(
         self,
@@ -341,16 +599,16 @@ class AuthStore:
             ).fetchone()
         return dict(row)
 
-    def link_yandex_user(
+    def link_sso_user(
         self,
         *,
-        yandex_id: str,
+        subject: str,
         email: str,
         display_name: str,
     ) -> dict[str, Any]:
         return self.link_external_user(
-            provider="yandex",
-            provider_user_id=yandex_id,
+            provider="yandex_identity_hub",
+            provider_user_id=subject,
             email=email,
             display_name=display_name,
         )

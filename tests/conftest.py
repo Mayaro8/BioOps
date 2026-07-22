@@ -3,4 +3,4 @@ import os
 
 # Existing endpoint tests exercise application behavior without an identity
 # provider. Authentication-specific tests enable it explicitly.
-os.environ.setdefault("YANDEX_AUTH_ENABLED", "false")
+os.environ.setdefault("BIOOPS_SSO_ENABLED", "false")
