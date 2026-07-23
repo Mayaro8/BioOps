@@ -124,6 +124,17 @@ def test_prompt_separates_workflow_health_from_batch_tracking():
     assert "selected batch/sample status" in prompt
 
 
+def test_prompt_separates_yandex_compute_vms_from_cluster_health():
+    tool = LLMRouterTool(
+        allowed_agents={"cluster_health", "infra_cost", "general"}
+    )
+
+    prompt = tool._build_prompt("show running Yandex Cloud VMs and costs")
+
+    assert "A request about a running Yandex/Compute VM is" in prompt
+    assert "do not use it for Yandex Cloud Compute VMs" in prompt
+
+
 def test_prompt_contains_storage_guidance():
     tool = LLMRouterTool(allowed_agents={"general", "storage"})
     prompt = tool._build_prompt("list vcf.gz objects")

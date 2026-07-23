@@ -167,8 +167,12 @@ Rules:
   node readiness, resource pressure, capacity, or unschedulable workflow pods.
 - Treat master node report, control-plane report, node health report, and cluster
   capacity report as cluster_health requests.
-- Choose infra_cost for Compute Cloud VM cost, expensive VMs, GPU runtime,
-  infrastructure cost alerts, database infrastructure, queues, or Cloud Functions.
+- Choose infra_cost for Yandex Cloud, Compute Cloud, virtual machines/VMs,
+  expensive VMs, GPU runtime, infrastructure cost alerts, database infrastructure,
+  queues, or Cloud Functions. A request about a running Yandex/Compute VM is
+  always infra_cost, even when it uses the word "running" or asks for cost.
+- Choose cluster_health only for Kubernetes/Argo workflow pods and worker/control-plane
+  nodes; do not use it for Yandex Cloud Compute VMs.
 - Return JSON only.
 
 JSON shape:
