@@ -5,6 +5,8 @@ from typing import Any
 
 from openai import AzureOpenAI
 
+from bioops.tools.azure_chat import create_chat_completion
+
 
 DEFAULT_ALLOWED_AGENTS = {
     "general",
@@ -85,16 +87,15 @@ class LLMRouterTool:
             {"role": "user", "content": prompt},
         ]
         try:
-            response = self.client.chat.completions.create(
+            # Routing is a lightweight classification: keep reasoning effort
+            # low so the interactive call stays fast and does not blow past the
+            # request timeout on reasoning models.
+            response = create_chat_completion(
+                self.client,
                 model=self.deployment,
                 messages=messages,
                 max_completion_tokens=250,
-            )
-        except TypeError:
-            response = self.client.chat.completions.create(
-                model=self.deployment,
-                messages=messages,
-                max_tokens=250,
+                reasoning_effort="low",
             )
         except Exception as error:
             raise RuntimeError(

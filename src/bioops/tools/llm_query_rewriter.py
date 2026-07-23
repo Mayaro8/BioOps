@@ -66,6 +66,7 @@ class LLMQueryRewriter:
                     },
                 ],
                 max_completion_tokens=400,
+                reasoning_effort="low",
             )
             content = response.choices[0].message.content or ""
             return self._parse_response(content)

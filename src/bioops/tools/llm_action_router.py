@@ -108,6 +108,7 @@ class LLMActionRouter:
                 model=self.deployment,
                 messages=messages,
                 max_completion_tokens=500,
+                reasoning_effort="low",
             )
         except Exception as error:
             # Fail closed: never guess an action that could start an external

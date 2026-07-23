@@ -96,6 +96,7 @@ class GeneralAgent(BaseAgent):
                     },
                 ],
                 max_completion_tokens=800,
+                reasoning_effort="low",
             )
         except Exception as error:
             # GeneralAgent is the router's ultimate fallback, so it must never
