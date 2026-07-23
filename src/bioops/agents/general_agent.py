@@ -39,7 +39,7 @@ class GeneralAgent(BaseAgent):
                 azure_endpoint=self.endpoint,
                 api_key=self.api_key,
                 api_version=self.api_version,
-                timeout=30.0,
+                timeout=10.0, max_retries=0,
             )
 
     def run(self, message: str) -> str:
@@ -111,7 +111,7 @@ class GeneralAgent(BaseAgent):
                         "content": prompt,
                     },
                 ],
-                max_tokens=800,
+                max_completion_tokens=800,
             )
         except Exception as error:
             return f"General LLM fallback failed: {type(error).__name__}: {error}"

@@ -33,7 +33,7 @@ class LLMQueryRewriter:
                 azure_endpoint=self.endpoint,
                 api_key=self.api_key,
                 api_version=self.api_version,
-                timeout=30.0,
+                timeout=10.0, max_retries=0,
             )
 
     def rewrite(self, message: str) -> str:
@@ -81,7 +81,7 @@ class LLMQueryRewriter:
                         "content": prompt,
                     },
                 ],
-                max_tokens=400,
+                max_completion_tokens=400,
             )
         except Exception as error:
             raise RuntimeError(

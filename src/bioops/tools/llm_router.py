@@ -57,7 +57,7 @@ class LLMRouterTool:
                 azure_endpoint=self.endpoint,
                 api_key=self.api_key,
                 api_version=self.api_version,
-                timeout=30.0,
+                timeout=10.0, max_retries=0,
             )
 
     def _strip_surrogates(self, text: str) -> str:
@@ -94,7 +94,7 @@ class LLMRouterTool:
             response = self.client.chat.completions.create(
                 model=self.deployment,
                 messages=messages,
-                max_tokens=250,
+                max_completion_tokens=250,
             )
         except Exception as error:
             raise RuntimeError(

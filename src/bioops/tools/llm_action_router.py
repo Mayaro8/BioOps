@@ -73,7 +73,7 @@ class LLMActionRouter:
                 azure_endpoint=self.endpoint,
                 api_key=self.api_key,
                 api_version=self.api_version,
-                timeout=30.0,
+                timeout=10.0, max_retries=0,
             )
 
     @property
@@ -110,7 +110,7 @@ class LLMActionRouter:
             response = self.client.chat.completions.create(
                 model=self.deployment,
                 messages=messages,
-                max_tokens=500,
+                max_completion_tokens=500,
             )
         except Exception as error:
             raise RuntimeError(

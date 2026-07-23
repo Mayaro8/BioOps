@@ -35,7 +35,7 @@ class LLMReviewTool:
                 azure_endpoint=self.endpoint,
                 api_key=self.api_key,
                 api_version=self.api_version,
-                timeout=30.0,
+                timeout=10.0, max_retries=0,
             )
 
     def review_prompt(self, prompt: str) -> str:
@@ -81,7 +81,7 @@ class LLMReviewTool:
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": prompt},
                     ],
-                    max_tokens=5000,
+                    max_completion_tokens=5000,
                 )
             except Exception as error:
                 raise LLMReviewError(
