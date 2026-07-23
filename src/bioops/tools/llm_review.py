@@ -2,6 +2,8 @@ import os
 
 from openai import AzureOpenAI
 
+from bioops.tools.azure_chat import create_chat_completion
+
 
 class LLMReviewError(RuntimeError):
     """Raised when mandatory LLM patch review cannot be completed."""
@@ -35,7 +37,7 @@ class LLMReviewTool:
                 azure_endpoint=self.endpoint,
                 api_key=self.api_key,
                 api_version=self.api_version,
-                timeout=10.0, max_retries=0,
+                timeout=60.0, max_retries=1,
             )
 
     def review_prompt(self, prompt: str) -> str:
@@ -65,7 +67,8 @@ class LLMReviewTool:
         )
 
         try:
-            response = self.client.chat.completions.create(
+            response = create_chat_completion(
+                self.client,
                 model=self.deployment,
                 messages=[
                     {"role": "system", "content": system_prompt},
@@ -73,20 +76,6 @@ class LLMReviewTool:
                 ],
                 max_completion_tokens=5000,
             )
-        except TypeError:
-            try:
-                response = self.client.chat.completions.create(
-                    model=self.deployment,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": prompt},
-                    ],
-                    max_completion_tokens=5000,
-                )
-            except Exception as error:
-                raise LLMReviewError(
-                    f"LLM patch review failed: {type(error).__name__}: {error}"
-                ) from error
         except Exception as error:
             raise LLMReviewError(
                 f"LLM patch review failed: {type(error).__name__}: {error}"

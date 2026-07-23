@@ -7,6 +7,8 @@ from typing import Any, Iterable, Mapping
 
 from openai import AzureOpenAI
 
+from bioops.tools.azure_chat import create_chat_completion
+
 
 @dataclass(frozen=True)
 class ActionDecision:
@@ -73,7 +75,7 @@ class LLMActionRouter:
                 azure_endpoint=self.endpoint,
                 api_key=self.api_key,
                 api_version=self.api_version,
-                timeout=10.0, max_retries=0,
+                timeout=20.0, max_retries=1,
             )
 
     @property
@@ -101,18 +103,15 @@ class LLMActionRouter:
         ]
 
         try:
-            response = self.client.chat.completions.create(
-                model=self.deployment,
-                messages=messages,
-                max_completion_tokens=500,
-            )
-        except TypeError:
-            response = self.client.chat.completions.create(
+            response = create_chat_completion(
+                self.client,
                 model=self.deployment,
                 messages=messages,
                 max_completion_tokens=500,
             )
         except Exception as error:
+            # Fail closed: never guess an action that could start an external
+            # operation. The agent turns this into a safe action_routing_error.
             raise RuntimeError(
                 f"{self.agent_name} action-router request failed: "
                 f"{type(error).__name__}: {error}"

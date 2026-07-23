@@ -14,6 +14,8 @@ class AzureEmbeddingClient:
             api_key=os.getenv("AZURE_OPENAI_API_KEY"),
             azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
             api_version=os.getenv("AZURE_OPENAI_API_VERSION"),
+            timeout=20.0,
+            max_retries=1,
         )
         self.deployment = os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT")
 

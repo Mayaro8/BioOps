@@ -3,6 +3,7 @@ import os
 from openai import AzureOpenAI
 
 from bioops.agents.base import BaseAgent
+from bioops.tools.azure_chat import create_chat_completion
 
 
 class GeneralAgent(BaseAgent):
@@ -39,7 +40,7 @@ class GeneralAgent(BaseAgent):
                 azure_endpoint=self.endpoint,
                 api_key=self.api_key,
                 api_version=self.api_version,
-                timeout=10.0, max_retries=0,
+                timeout=20.0, max_retries=1,
             )
 
     def run(self, message: str) -> str:
@@ -78,25 +79,8 @@ class GeneralAgent(BaseAgent):
         )
 
         try:
-            response = self.client.chat.completions.create(
-                model=self.deployment,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are the general fallback assistant for BioOps. "
-                            "Be helpful, practical, and honest about unavailable tools."
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt,
-                    },
-                ],
-                max_completion_tokens=800,
-            )
-        except TypeError:
-            response = self.client.chat.completions.create(
+            response = create_chat_completion(
+                self.client,
                 model=self.deployment,
                 messages=[
                     {
@@ -114,6 +98,29 @@ class GeneralAgent(BaseAgent):
                 max_completion_tokens=800,
             )
         except Exception as error:
-            return f"General LLM fallback failed: {type(error).__name__}: {error}"
+            # GeneralAgent is the router's ultimate fallback, so it must never
+            # hard-fail on a slow/unavailable LLM. Return a useful static reply.
+            return self._degraded_reply(error)
 
-        return response.choices[0].message.content or "General LLM fallback returned no content."
+        return response.choices[0].message.content or self._degraded_reply(
+            RuntimeError("model returned no content")
+        )
+
+    @staticmethod
+    def _degraded_reply(error: Exception) -> str:
+        return "\n".join(
+            [
+                "BioOps is temporarily unable to reach the general assistant "
+                f"model ({type(error).__name__}).",
+                "",
+                "The request was understood, but the LLM response could not be "
+                "completed right now (likely a transient Azure OpenAI timeout).",
+                "",
+                "You can retry shortly, or ask a specialist directly, e.g.:",
+                "- workflow / pod health  -> cluster health",
+                "- batch or sample status -> batch status",
+                "- bucket inventory       -> storage",
+                "- VM / cost questions    -> infra & cost",
+                "- documentation          -> knowledge",
+            ]
+        )

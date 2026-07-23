@@ -4,6 +4,8 @@ from typing import Any
 
 from openai import AzureOpenAI
 
+from bioops.tools.azure_chat import create_chat_completion
+
 
 class LLMQueryRewriter:
     """LLM-only query rewriter for KnowledgeAgent RAG retrieval."""
@@ -33,20 +35,21 @@ class LLMQueryRewriter:
                 azure_endpoint=self.endpoint,
                 api_key=self.api_key,
                 api_version=self.api_version,
-                timeout=10.0, max_retries=0,
+                timeout=20.0, max_retries=1,
             )
 
     def rewrite(self, message: str) -> str:
+        # Query rewriting is a best-effort optimization for retrieval. If Azure
+        # is unavailable or slow, degrade to the original message instead of
+        # failing the whole Knowledge request so RAG can still run.
         if not self.enabled or self.client is None:
-            raise RuntimeError(
-                "LLM query rewriter unavailable: Azure OpenAI environment "
-                "variables are not fully configured."
-            )
+            return message.strip()
 
         prompt = self._build_prompt(message)
 
         try:
-            response = self.client.chat.completions.create(
+            response = create_chat_completion(
+                self.client,
                 model=self.deployment,
                 messages=[
                     {
@@ -64,32 +67,10 @@ class LLMQueryRewriter:
                 ],
                 max_completion_tokens=400,
             )
-        except TypeError:
-            response = self.client.chat.completions.create(
-                model=self.deployment,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You rewrite BioOps KnowledgeAgent questions into "
-                            "better semantic search queries for RAG retrieval. "
-                            "Return strict JSON only."
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt,
-                    },
-                ],
-                max_completion_tokens=400,
-            )
-        except Exception as error:
-            raise RuntimeError(
-                f"LLM query rewrite request failed: {type(error).__name__}: {error}"
-            ) from error
-
-        content = response.choices[0].message.content or ""
-        return self._parse_response(content)
+            content = response.choices[0].message.content or ""
+            return self._parse_response(content)
+        except Exception:
+            return message.strip()
 
     def _build_prompt(self, message: str) -> str:
         return f"""

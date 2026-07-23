@@ -89,3 +89,4 @@ class AzureChatClient:
             blocks.append("\n".join(lines))
 
         return "\n\n---\n\n".join(blocks)
+    

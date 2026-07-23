@@ -57,33 +57,37 @@ class KnowledgeAgent(BaseAgent):
         except Exception as error:
             return self._format_query_rewrite_error(error)
 
-        query_vector = self.embedder.embed_text(rewritten_query)
+        try:
+            query_vector = self.embedder.embed_text(rewritten_query)
+        except Exception as error:
+            return self._format_backend_error("embedding", error)
 
         wiki_chunks = self._search_wiki(query_vector)
 
-        if wiki_chunks:
-            return self.chat.answer_from_chunks(
-                question=message,
-                chunks=wiki_chunks,
-            ).strip()
+        try:
+            if wiki_chunks:
+                return self.chat.answer_from_chunks(
+                    question=message,
+                    chunks=wiki_chunks,
+                ).strip()
 
-        chunks = self.store.search(
-            query_vector,
-            limit=self.top_k,
-        )
-
-        if not chunks:
-            return (
-                "I could not find relevant BioOps knowledge in Yandex Wiki "
-                "or the bundled documentation."
+            chunks = self.store.search(
+                query_vector,
+                limit=self.top_k,
             )
 
-        answer = self.chat.answer_from_chunks(
-            question=message,
-            chunks=chunks,
-        )
+            if not chunks:
+                return (
+                    "I could not find relevant BioOps knowledge in Yandex Wiki "
+                    "or the bundled documentation."
+                )
 
-        return answer.strip()
+            return self.chat.answer_from_chunks(
+                question=message,
+                chunks=chunks,
+            ).strip()
+        except Exception as error:
+            return self._format_backend_error("answer synthesis", error)
 
     def _search_wiki(
         self,
@@ -114,6 +118,20 @@ class KnowledgeAgent(BaseAgent):
             if getattr(chunk, "score", None) is None
             or float(chunk.score) >= minimum_score
         ]
+
+    def _format_backend_error(self, stage: str, error: Exception) -> str:
+        return "\n".join(
+            [
+                "Knowledge retrieval is temporarily unavailable",
+                "",
+                "Status: knowledge_backend_error",
+                f"Stage: {stage}",
+                f"Error: {type(error).__name__}: {error}",
+                "",
+                "This is usually a transient Azure OpenAI or Qdrant timeout. "
+                "Please retry shortly.",
+            ]
+        )
 
     def _format_query_rewrite_error(self, error: Exception) -> str:
         return "\n".join(
