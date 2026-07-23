@@ -57,7 +57,7 @@ class LLMRouterTool:
                 azure_endpoint=self.endpoint,
                 api_key=self.api_key,
                 api_version=self.api_version,
-                timeout=30.0, max_retries=0,
+                timeout=30.0,
             )
 
     def _strip_surrogates(self, text: str) -> str:
@@ -88,8 +88,13 @@ class LLMRouterTool:
             response = self.client.chat.completions.create(
                 model=self.deployment,
                 messages=messages,
-                reasoning_effort="none",
-                max_completion_tokens=100,
+                max_completion_tokens=250,
+            )
+        except TypeError:
+            response = self.client.chat.completions.create(
+                model=self.deployment,
+                messages=messages,
+                max_tokens=250,
             )
         except Exception as error:
             raise RuntimeError(
@@ -162,12 +167,8 @@ Rules:
   node readiness, resource pressure, capacity, or unschedulable workflow pods.
 - Treat master node report, control-plane report, node health report, and cluster
   capacity report as cluster_health requests.
-- Choose infra_cost for Yandex Cloud, Compute Cloud, virtual machines/VMs,
-  expensive VMs, GPU runtime, infrastructure cost alerts, database infrastructure,
-  queues, or Cloud Functions. A request about a running Yandex/Compute VM is
-  always infra_cost, even when it uses the word "running" or asks for cost.
-- Choose cluster_health only for Kubernetes/Argo workflow pods and worker/control-plane
-  nodes; do not use it for Yandex Cloud Compute VMs.
+- Choose infra_cost for Compute Cloud VM cost, expensive VMs, GPU runtime,
+  infrastructure cost alerts, database infrastructure, queues, or Cloud Functions.
 - Return JSON only.
 
 JSON shape:
