@@ -22,3 +22,4 @@ google-auth
 PyJWT[crypto]
 
 boto3
+yandexcloud

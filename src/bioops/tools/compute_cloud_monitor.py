@@ -27,6 +27,7 @@ class VMInstance:
     memory_gb: float
     gpu_count: int
     projected_monthly_cost_rub: float
+    created_at: datetime | None = None
 
 
 @dataclass(frozen=True)
